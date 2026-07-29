@@ -1,0 +1,7 @@
+name = "pulss"
+compatibility_date = "2025-01-01"
+
+# Статичный сайт: раздаём index.html как ассеты.
+[assets]
+directory = "./"
+not_found_handling = "single-page-application"
