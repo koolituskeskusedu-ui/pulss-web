@@ -3665,6 +3665,21 @@ async function api(path,{method="GET",body=null}={}){
 }
 async function serverHealth(){ try{ const h=await api("/api/health"); SERVER.online=!!(h&&h.ok); return h; }catch(e){ SERVER.online=false; return null; } }
 
+// Загрузка файла: на сервере → в R2 (возвращает URL), в демо → base64 (data-URL).
+async function uploadFile(file){
+  if(SERVER.mode==="server"){
+    try{
+      const res=await fetch(API_BASE+"/api/files",{ method:"POST", credentials:"include",
+        headers:{ "Content-Type":file.type||"application/octet-stream", "X-File-Name":encodeURIComponent(file.name||"file") },
+        body:file });
+      const d=await res.json().catch(()=>null);
+      if(res.ok&&d&&d.url) return d.url;
+    }catch(e){}
+    // если сервер не принял — не теряем файл, кладём как base64
+  }
+  return await new Promise(resolve=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.readAsDataURL(file); });
+}
+
 // Перенос профиля с сервера в текущую сессию
 function applyServerSession(me){
   if(!me) return;
@@ -5732,7 +5747,7 @@ function bindEditor(){
   document.querySelectorAll("[data-cc]").forEach(el=>el.oninput=()=>{c.cert=c.cert||{};c.cert[el.dataset.cc]=el.value;});
   document.querySelectorAll("[data-cc-num]").forEach(el=>el.oninput=()=>{c.cert=c.cert||{};c.cert[el.dataset.ccNum]=+el.value||0;});
   document.querySelectorAll("[data-cc-toggle]").forEach(el=>el.onclick=()=>{c.cert=c.cert||{};c.cert[el.dataset.ccToggle]=!c.cert[el.dataset.ccToggle];scheduleCourseSave();render();});
-  document.querySelectorAll("[data-cc-logo]").forEach(el=>el.onclick=()=>{const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=()=>{const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{c.cert=c.cert||{};c.cert.logo=r.result;scheduleCourseSave();render();};r.readAsDataURL(f);};inp.click();});
+  document.querySelectorAll("[data-cc-logo]").forEach(el=>el.onclick=()=>{const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=async()=>{const f=inp.files[0];if(!f)return;toast(LANG==="et"?"Laen üles…":"Загрузка…");const src=await uploadFile(f);c.cert=c.cert||{};c.cert.logo=src;scheduleCourseSave();render();};inp.click();});
   document.querySelectorAll("[data-cc-logo-del]").forEach(el=>el.onclick=()=>{if(c.cert)delete c.cert.logo;scheduleCourseSave();render();});
   document.querySelectorAll("[data-add-hw]").forEach(el=>el.onclick=()=>{c.homework=c.homework||[];c.homework.push({id:uid("hw"),title:"Новое задание",description:"",deadline:""});scheduleCourseSave();render();});
   document.querySelectorAll("[data-hwtitle]").forEach(el=>el.oninput=()=>{c.homework.find(h=>h.id===el.dataset.hwtitle).title=el.value;});
@@ -5740,7 +5755,7 @@ function bindEditor(){
   document.querySelectorAll("[data-hwdl]").forEach(el=>el.onchange=()=>{c.homework.find(h=>h.id===el.dataset.hwdl).deadline=el.value;});
   document.querySelectorAll("[data-del-hw]").forEach(el=>el.onclick=()=>{c.homework=c.homework.filter(h=>h.id!==el.dataset.delHw);scheduleCourseSave();render();});
   document.querySelectorAll("[data-notify-hw]").forEach(el=>el.onclick=()=>{const h=c.homework.find(h=>h.id===el.dataset.notifyHw);const recips=DB.students.filter(s=>s.courses.includes(c.id));recips.forEach(s=>{const em=buildEmail("hw",{student:fullName(s),course:c.title,task:h.title,deadline:h.deadline?fmtDate(h.deadline):"—"},()=>emailHwAdded(c,h));queueEmail(s.email,em.s,em.b,"hw");pushNotif(s.id,`${LANG==="et"?"Uus kodutöö":"Новое задание"}: ${h.title}`,"hw","homework");});logAudit(`Уведомление о задании «${h.title}» (${recips.length})`);toast(`📧 ${recips.length} ${t("notif_queued")}`);});
-  document.querySelectorAll("[data-add-mat]").forEach(el=>el.onclick=()=>{const l=allLessons(c).find(x=>x.id===el.dataset.addMat);const inp=document.createElement("input");inp.type="file";inp.onchange=()=>{const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{l.materials=l.materials||[];l.materials.push({id:uid("mat"),name:f.name,kind:f.type.startsWith("image/")?"image":"file",src:r.result});scheduleCourseSave();render();};r.readAsDataURL(f);};inp.click();});
+  document.querySelectorAll("[data-add-mat]").forEach(el=>el.onclick=()=>{const l=allLessons(c).find(x=>x.id===el.dataset.addMat);const inp=document.createElement("input");inp.type="file";inp.onchange=async()=>{const f=inp.files[0];if(!f)return;toast(LANG==="et"?"Laen üles…":"Загрузка…");const src=await uploadFile(f);l.materials=l.materials||[];l.materials.push({id:uid("mat"),name:f.name,kind:f.type.startsWith("image/")?"image":"file",src});scheduleCourseSave();render();};inp.click();});
   document.querySelectorAll("[data-del-mat]").forEach(el=>el.onclick=()=>{const[lid,mid]=el.dataset.delMat.split(":");const l=allLessons(c).find(x=>x.id===lid);l.materials=(l.materials||[]).filter(m=>m.id!==mid);scheduleCourseSave();render();});
   // Autosave: любое редактирование текстовых полей курса → отложенное сохранение на сервер
   if(SERVER.mode==="server"){ const mn=$(".main"); if(mn){ mn.addEventListener("input",scheduleCourseSave); mn.addEventListener("change",scheduleCourseSave); } }
@@ -5774,7 +5789,7 @@ function editQuiz(c,lid){
     document.querySelectorAll("[data-ao]").forEach(el=>el.onclick=()=>{quiz.questions[+el.dataset.ao].options.push("Новый вариант");draw();});
     document.querySelectorAll("[data-do]").forEach(el=>el.onclick=()=>{const[qi,oi]=el.dataset.do.split(":").map(Number);const q=quiz.questions[qi];if(q.options.length<=2){toast(t("min_2opt"));return;}q.options.splice(oi,1);if(q.correct>=q.options.length)q.correct=0;draw();});
     document.querySelectorAll("[data-dq]").forEach(el=>el.onclick=()=>{if(quiz.questions.length<=1){toast(t("min_1q"));return;}quiz.questions.splice(+el.dataset.dq,1);draw();});
-    document.querySelectorAll("[data-qimg]").forEach(el=>el.onclick=()=>{const qi=+el.dataset.qimg;const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=()=>{const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{quiz.questions[qi].image=r.result;draw();};r.readAsDataURL(f);};inp.click();});
+    document.querySelectorAll("[data-qimg]").forEach(el=>el.onclick=()=>{const qi=+el.dataset.qimg;const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=async()=>{const f=inp.files[0];if(!f)return;toast(LANG==="et"?"Laen üles…":"Загрузка…");const src=await uploadFile(f);quiz.questions[qi].image=src;scheduleCourseSave();draw();};inp.click();});
     document.querySelectorAll("[data-qimgdel]").forEach(el=>el.onclick=()=>{delete quiz.questions[+el.dataset.qimgdel].image;draw();});
     $("[data-aq]").onclick=()=>{quiz.questions.push({q:"Новый вопрос?",options:["Вариант 1","Вариант 2"],correct:0});draw();};
     $("[data-save-quiz]").onclick=()=>{$("#modal-root").innerHTML="";scheduleCourseSave();render();toast(t("saved"));};
