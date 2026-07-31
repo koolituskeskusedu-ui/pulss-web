@@ -3532,11 +3532,11 @@ function genPassword(){ const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstu
   let s=""; for(let i=0;i<8;i++){ s+=chars[a[i]%chars.length]; if(i===3)s+="-"; } return s; }
 function emailCredentials(s){ return {s:"Ligipääs platvormile", b:`Kasutajanimi: ${fullName(s)}. Parool: ${s.password}. Palun muuda parool esimesel sisenemisel.`}; }
 function copyText(txt){ try{ navigator.clipboard.writeText(txt).then(()=>toast(t("copied")),()=>toast(txt)); }catch(e){ toast(txt); } }
-function showCredentials(s){
+function showCredentials(s,loginText){
   $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" style="max-width:440px" onclick="event.stopPropagation()">
     <div style="font-size:40px;text-align:center;margin-bottom:6px">✅</div>
     <h2 style="text-align:center;margin-bottom:2px">${t("credentials")}</h2><div class="msub" style="text-align:center">${t("cred_hint")}</div>
-    <div class="field"><label>${t("cred_login")}</label><input readonly value="${esc(fullName(s))}"></div>
+    <div class="field"><label>${t("cred_login")}</label><input readonly value="${esc(loginText||fullName(s))}"></div>
     <div class="field"><label>${t("cred_pass")}</label><div style="display:flex;gap:8px"><input readonly value="${esc(s.password)}" style="font-family:ui-monospace,monospace;font-weight:600"><button class="btn" data-copy="${esc(s.password)}">📋 ${t("copy")}</button></div></div>
     <div class="modal-foot" style="justify-content:center"><button class="btn primary" data-close2>${t("close")}</button></div></div></div>`;
   document.querySelectorAll("[data-copy]").forEach(el=>el.onclick=()=>copyText(el.dataset.copy));
@@ -3698,21 +3698,25 @@ function applyServerSession(me){
     DB.session={role:"student",studentId:u.id};
   } else {
     const u=me.user||{};
+    const grp=(u.groups===undefined)?"all":((u.groups==="all"||!Array.isArray(u.groups))?"all":u.groups);
     let st=DB.staff.find(x=>x.id===u.id);
-    if(!st){ st={id:u.id,name:u.name||"",login:u.login||"",password:"",role:u.role||"admin",perms:u.perms||{},groups:"all"}; DB.staff.push(st); }
-    else { st.role=u.role||st.role; st.perms=u.perms||st.perms; st.name=u.name||st.name; }
+    if(!st){ st={id:u.id,name:u.name||"",login:u.login||"",password:"",role:u.role||"admin",perms:u.perms||{},groups:grp}; DB.staff.push(st); }
+    else { st.role=u.role||st.role; st.perms=u.perms||st.perms; st.name=u.name||st.name; st.login=u.login||st.login; st.groups=grp; }
     DB.session={role:u.role||"admin",staffId:u.id};
   }
   SERVER.mode="server";
 }
 // Подтягивание справочников с сервера (что уже есть на бэкенде)
 function mapStudent(x){ return {id:x.id,firstName:x.first_name,lastName:x.last_name,isikukood:x.isikukood,email:x.email||"",groupId:x.group_id||"",courses:[],lastActive:x.last_active||null,completedAt:x.completed_at||null,archiveAt:x.archive_at||null,archived:!!x.archived}; }
+function mapStaff(x){ return {id:x.id,name:x.name,login:x.login,password:"",role:x.role||"teacher",perms:x.perms||{},groups:(x.scope_all||x.groups==="all"||!Array.isArray(x.groups))?"all":x.groups}; }
+async function hydrateStaff(){ try{ const st=await api("/api/staff"); if(Array.isArray(st)) DB.staff=st.map(mapStaff); }catch(e){} }
 async function hydrateReference(){
   try{ const st=await api("/api/settings"); mapSettings(st); }catch(e){}
   try{ const gs=await api("/api/groups"); if(Array.isArray(gs)) DB.groups=gs.map(g=>({id:g.id,name:g.name})); }catch(e){}
   try{ const studs=await api("/api/students"); if(Array.isArray(studs)) DB.students=studs.map(mapStudent); }catch(e){}
   try{ const cs=await api("/api/courses"); if(Array.isArray(cs)) DB.courses=cs; }catch(e){}
   await hydrateLearning();
+  if(DB.session&&DB.session.role==="admin") await hydrateStaff();
   if(DB.session&&DB.session.role!=="student") await hydrateRequests();
 }
 // Гидрация записей на курсы, прогресса, тестов и сдач домашек с сервера.
@@ -5496,14 +5500,25 @@ function staffCard(id){
   const togglePerms=()=>{ const isAdm=$("#uf-role").value==="admin"; $("#uf-perms-wrap").style.display=isAdm?"none":"block"; $("#uf-scope-wrap").style.display=isAdm?"none":"block"; };
   $("#uf-role").onchange=togglePerms; togglePerms();
   const allgToggle=$("[data-uf-allg]"); allgToggle.onclick=()=>{ const sp=allgToggle.querySelector(".toggle"); const on=!sp.classList.contains("on"); sp.classList.toggle("on",on); $("#uf-groups").style.display=on?"none":"grid"; };
-  $("[data-uf-gen]").onclick=()=>{$("#uf-pass").value=genPassword();};
-  $("[data-uf-save]").onclick=()=>{ data.name=$("#uf-name").value.trim(); data.login=$("#uf-login").value.trim(); data.password=$("#uf-pass").value.trim(); data.role=$("#uf-role").value;
+  $("[data-uf-gen]").onclick=async()=>{
+    if(SERVER.mode==="server"&&!isNew){ try{ const res=await api(`/api/staff/${data.id}/reset-password`,{method:"POST"}); if(res&&res.password){ $("#uf-pass").value=res.password; logAudit(`Сбросил пароль сотрудника ${data.name}`); showCredentials({password:res.password},data.login||$("#uf-login").value.trim()); } }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); } return; }
+    $("#uf-pass").value=genPassword(); };
+  const collectStaff=()=>{ data.name=$("#uf-name").value.trim(); data.login=$("#uf-login").value.trim(); data.password=$("#uf-pass").value.trim(); data.role=$("#uf-role").value;
     data.perms={}; document.querySelectorAll("[data-uf-perm]:checked").forEach(el=>data.perms[el.dataset.ufPerm]=true);
-    data.groups=$("[data-uf-allg] .toggle").classList.contains("on")?"all":[...document.querySelectorAll("[data-uf-group]:checked")].map(el=>el.dataset.ufGroup);
+    data.groups=$("[data-uf-allg] .toggle").classList.contains("on")?"all":[...document.querySelectorAll("[data-uf-group]:checked")].map(el=>el.dataset.ufGroup); };
+  $("[data-uf-save]").onclick=async()=>{ collectStaff();
     if(!data.name||!data.login){toast(LANG==="et"?"Täida nimi ja login":"Заполните имя и логин");return;}
+    if(SERVER.mode==="server"){ const body={name:data.name,login:data.login,role:data.role,perms:data.perms,groups:data.groups};
+      try{ if(isNew){ const res=await api("/api/staff",{method:"POST",body:{...body,password:data.password}}); await hydrateStaff(); logAudit(`Добавил сотрудника ${data.name} (${data.role})`); $("#modal-root").innerHTML=""; render(); showCredentials({password:res.password||data.password},data.login); }
+        else{ await api(`/api/staff/${data.id}`,{method:"PUT",body}); await hydrateStaff(); logAudit(`Изменил доступы ${data.name}`); toast(t("saved")); $("#modal-root").innerHTML=""; render(); } }
+      catch(e){ toast(e&&e.data&&e.data.error==="login_taken"?(LANG==="et"?"Login on juba kasutusel":"Логин уже занят"):(LANG==="et"?"Serveri viga":"Ошибка сервера")); }
+      return; }
     if(isNew){DB.staff.push(data);logAudit(`Добавил сотрудника ${data.name} (${data.role})`);toast(t("staff_added"));}else{Object.assign(u,data);logAudit(`Изменил доступы ${data.name}`);toast(t("saved"));}
     $("#modal-root").innerHTML=""; render(); };
-  const del=$("[data-uf-del]"); if(del)del.onclick=()=>{ if(u.role==="admin"&&DB.staff.filter(x=>x.role==="admin").length<=1){toast(LANG==="et"?"Peab jääma vähemalt üks administraator":"Должен остаться хотя бы один админ");return;} DB.staff=DB.staff.filter(x=>x.id!==data.id); logAudit(`Удалил сотрудника ${data.name}`); $("#modal-root").innerHTML=""; render(); };
+  const del=$("[data-uf-del]"); if(del)del.onclick=async()=>{ if(u.role==="admin"&&DB.staff.filter(x=>x.role==="admin").length<=1){toast(LANG==="et"?"Peab jääma vähemalt üks administraator":"Должен остаться хотя бы один админ");return;}
+    if(SERVER.mode==="server"){ try{ await api(`/api/staff/${data.id}`,{method:"DELETE"}); await hydrateStaff(); }catch(e){ toast(e&&e.data&&e.data.error==="last_admin"?(LANG==="et"?"Peab jääma vähemalt üks administraator":"Должен остаться хотя бы один админ"):(LANG==="et"?"Serveri viga":"Ошибка сервера")); return; } }
+    else DB.staff=DB.staff.filter(x=>x.id!==data.id);
+    logAudit(`Удалил сотрудника ${data.name}`); $("#modal-root").innerHTML=""; render(); };
   document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
 }
 
