@@ -4137,7 +4137,7 @@ function homeworkView(){
         ${descHtml}
         <div class="hmeta"><span>📚 ${esc(c.title)}</span><span style="${overdue?"color:var(--red);font-weight:600":""}">⏰ ${t("deadline")}: ${fmtDate(h.deadline)}</span></div></div><div>${status}</div></div>
         ${sub&&sub.grade!==null&&(sub.feedback||sub.gradedBy)?`<div style="margin-top:12px;padding:11px 14px;background:var(--green-soft);border-radius:10px;font-size:13.5px">${sub.feedback?`<b>${t("feedback")}:</b> ${esc(sub.feedback)}`:""}${sub.gradedBy?`<div style="color:var(--muted);margin-top:${sub.feedback?"4px":"0"}">${t("graded_by")}: ${esc(sub.gradedBy)}</div>`:""}</div>`:""}
-        ${sub?`<div style="margin-top:10px;font-size:13px;color:var(--muted)">📎 ${esc(sub.fileName)} · ${fmtDate(sub.date)} ${sub.grade===null?`<span class="link" data-submit-hw="${c.id}:${h.id}" style="margin-left:8px">${t("hw_resubmit")}</span>`:""}</div>`
+        ${sub?`<div style="margin-top:10px;font-size:13px;color:var(--muted)">📎 ${sub.fileUrl?`<a class="link" href="${sub.fileUrl}" target="_blank" rel="noopener" download="${esc(sub.fileName)}">${esc(sub.fileName)}</a>`:esc(sub.fileName)} · ${fmtDate(sub.date)} ${sub.grade===null?`<span class="link" data-submit-hw="${c.id}:${h.id}" style="margin-left:8px">${t("hw_resubmit")}</span>`:""}</div>`
           :`<div class="file-drop" data-submit-hw="${c.id}:${h.id}">📎 ${t("hw_attach")}</div>`}</div>`;
     }).join(""):emptyState("📝",LANG==="et"?"Kodutöid pole":"Домашних заданий нет")}</div>`;
 }
@@ -4807,7 +4807,7 @@ function adminReviewView(){
       ${subs.map(x=>{const s=studentById(x.studentId);const c=courseById(x.courseId);const h=(c?.homework||[]).find(h=>h.id===x.hwId);const overdue=h?.deadline&&x.date>h.deadline;
         return `<tr><td><b>${esc(fullName(s))}</b><div style="font-size:12px;color:var(--faint)">${esc(groupById(s.groupId)?.name||"")}</div></td>
         <td>${esc(h?.title||"")}${overdue?` <span class="badge late">${t("hw_overdue")}</span>`:""}<div style="font-size:12px;color:var(--faint)">${esc(c?.title||"")}</div></td>
-        <td><span class="link">📎 ${esc(x.fileName)}</span></td><td style="color:var(--muted)">${fmtDate(x.date)}</td>
+        <td>${x.fileUrl?`<a class="link" href="${x.fileUrl}" target="_blank" rel="noopener" download="${esc(x.fileName)}">📎 ${esc(x.fileName)}</a>`:`<span style="color:var(--muted)">📎 ${esc(x.fileName)}</span>`}</td><td style="color:var(--muted)">${fmtDate(x.date)}</td>
         <td>${x.grade!==null?`<b style="font-size:15px">${isNumGrade(x.grade)?x.grade+`</b><span style="color:var(--faint)"> /100</span>`:esc(x.grade)+"</b>"}${x.gradedBy?`<div style="font-size:11.5px;color:var(--faint)">${t("graded_by")}: ${esc(x.gradedBy)}</div>`:""}`:`<span class="badge pending">—</span>`}</td>
         <td style="text-align:right"><button class="btn sm ${x.grade===null?"primary":""}" data-grade="${x.id}">${x.grade===null?t("give_grade"):t("edit")}</button></td></tr>`;}).join("")}
     </tbody></table>`:emptyState("📝",t("no_subs"))}</div>`;
