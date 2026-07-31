@@ -3714,6 +3714,10 @@ function mapMeeting(x){ return {id:x.id,courseId:x.course_id,groupId:x.group_id,
 function mapMessage(x){ return {id:x.id,studentId:x.student_id,from:x.sender,text:x.text,ts:x.ts,read:!!x.read}; }
 async function hydrateMeetings(){ try{ const m=await api("/api/meetings"); if(Array.isArray(m)) DB.meetings=m.map(mapMeeting); }catch(e){} }
 async function hydrateMessages(){ try{ const m=await api("/api/messages"); if(Array.isArray(m)) DB.messages=m.map(mapMessage); }catch(e){} }
+function mapCert(x){ return {id:x.id,number:x.number,studentId:x.student_id,courseId:x.course_id,date:x.date,validUntil:x.valid_until||null,pdfKey:x.pdf_key||null}; }
+async function hydrateCerts(){ try{ const cs=await api("/api/certificates"); if(Array.isArray(cs)) DB.certificates=cs.map(mapCert); }catch(e){} }
+function mapInvoice(x){ return {id:x.id,number:x.number,numberStr:x.number_str,viitenumber:x.viitenumber||"",kind:x.kind||"invoice",creditOf:x.credit_of||null,creditedBy:x.credited_by||null,mode:x.mode||"group",groupId:x.group_id||"",courseId:x.course_id||"",buyer:{name:x.buyer_name||"",regCode:x.buyer_regcode||"",vatNo:x.buyer_vatno||"",address:x.buyer_address||"",email:x.buyer_email||""},participants:x.participants||[],items:(x.items||[]).map(it=>({desc:it.desc,qty:it.qty,price:it.price})),vatRate:x.vat_rate,priceIncludesVat:!!x.priceIncludesVat,note:x.note||"",date:x.date,dueDate:x.due_date||"",paid:!!x.paid,paidDate:x.paid_date||null,createdAt:x.created_at||""}; }
+async function hydrateInvoices(){ try{ const iv=await api("/api/invoices"); if(Array.isArray(iv)) DB.invoices=iv.map(mapInvoice); }catch(e){} }
 async function hydrateReference(){
   try{ const st=await api("/api/settings"); mapSettings(st); }catch(e){}
   try{ const gs=await api("/api/groups"); if(Array.isArray(gs)) DB.groups=gs.map(g=>({id:g.id,name:g.name})); }catch(e){}
@@ -3722,6 +3726,8 @@ async function hydrateReference(){
   await hydrateLearning();
   await hydrateMeetings();
   await hydrateMessages();
+  await hydrateCerts();
+  if(DB.session&&DB.session.role!=="student"){ await hydrateInvoices(); }
   if(DB.session&&DB.session.role==="admin") await hydrateStaff();
   if(DB.session&&DB.session.role!=="student") await hydrateRequests();
 }
@@ -4922,15 +4928,17 @@ function adminCertsView(){
       <button class="tab ${certTab==="registry"?"on":""}" data-certtab="registry">${t("tab_registry")}${DB.certificates.length?`<span class="pip" style="background:var(--brand)">${DB.certificates.length}</span>`:""}</button></div>
     ${certTab==="issue"?issueTab:registryTab}</div>`;
 }
-function bulkIssueCerts(keys){
-  let n=0; keys.forEach(k=>{const[sid,cid]=k.split(":");if(!certFor(sid,cid)&&isCourseComplete(sid,courseById(cid))){issueCert(sid,cid,true);n++;}});
+async function bulkIssueCerts(keys){
+  let n=0; for(const k of keys){const[sid,cid]=k.split(":");if(!certFor(sid,cid)&&isCourseComplete(sid,courseById(cid))){const r=await issueCert(sid,cid,true);if(r)n++;}}
   certSel.clear(); render();
   showInfoModal("🖋️",`${t("bulk_issue_n")}: ${n}`,null,t("cert_digi_msg"));
 }
-function issueCert(sid,cid,silent){
+async function issueCert(sid,cid,silent){
   if(certFor(sid,cid))return null;
-  const number=DB.certificates.length+1;
-  DB.certificates.push({id:uid("ct"),number,studentId:sid,courseId:cid,date:today(),validUntil:addMonths(today(),(courseById(cid)?.cert?.validMonths)||DB.settings.certValidMonths)});
+  const validUntil=addMonths(today(),(courseById(cid)?.cert?.validMonths)||DB.settings.certValidMonths);
+  let number=DB.certificates.length+1, cid2=uid("ct");
+  if(SERVER.mode==="server"){ try{ const res=await api("/api/certificates",{method:"POST",body:{student_id:sid,course_id:cid,valid_until:validUntil}}); if(res){ if(res.number)number=res.number; if(res.id)cid2=res.id; } }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); return null; } }
+  DB.certificates.push({id:cid2,number,studentId:sid,courseId:cid,date:today(),validUntil});
   const s=studentById(sid); s.completedAt=today(); s.archiveAt=addDays(today(),DB.settings.archiveDays);
   pushNotif(sid,`${LANG==="et"?"Tunnistus väljastatud (digiallkirjastamisel)":"Сертификат выдан (на подписании)"}: ${courseById(cid)?.title||""}`,"cert","student-certs");
   logAudit(`Väljastas tunnistuse №${String(number).padStart(3,"0")} — ${fullName(s)} · ${courseById(cid)?.title||""}`);
@@ -4939,7 +4947,8 @@ function issueCert(sid,cid,silent){
 }
 function revokeCert(sid,cid){
   const ct=certFor(sid,cid); if(!ct)return;
-  confirmModal(`${t("cert_del_confirm")} ${t("cert_no")}${String(ct.number).padStart(3,"0")}?`,()=>{
+  confirmModal(`${t("cert_del_confirm")} ${t("cert_no")}${String(ct.number).padStart(3,"0")}?`,async()=>{
+    if(SERVER.mode==="server"){ try{ await api(`/api/certificates/${ct.id}`,{method:"DELETE"}); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; } }
     DB.certificates=DB.certificates.filter(x=>x.id!==ct.id);
     const s=studentById(sid); if(s&&!DB.certificates.some(x=>x.studentId===sid)){ s.completedAt=null; s.archiveAt=null; }
     logAudit(`Tühistas tunnistuse №${String(ct.number).padStart(3,"0")} — ${fullName(studentById(sid))}`);
@@ -5194,11 +5203,18 @@ function invoiceModal(id){
   }
   function updateTotals(){ const n=$("#inv-tot-net"),v=$("#inv-tot-vat"),g=$("#inv-tot-gross");
     if(n)n.textContent=money(invNet(data)); if(v)v.textContent=money(invVat(data)); if(g)g.textContent=money(invGross(data)); }
-  function saveInvoice(){
+  async function saveInvoice(){
     collect();
     if(!data.participants.length){toast(t("inv_no_participants"));return;}
     if(!data.buyer.name){toast(t("inv_company"));return;}
     if(!data.items.length){toast(t("inv_items"));return;}
+    const body={mode:data.mode,groupId:data.groupId,courseId:data.courseId,buyer:data.buyer,participants:data.participants,items:data.items,vatRate:data.vatRate,priceIncludesVat:data.priceIncludesVat,note:data.note,date:data.date,dueDate:data.dueDate};
+    if(SERVER.mode==="server"){
+      try{ if(existing){ if(existing.creditedBy){toast(t("inv_locked_credited"));return;} await api(`/api/invoices/${existing.id}`,{method:"PUT",body}); logAudit(`Muutis arvet ${existing.numberStr}`); }
+        else{ const res=await api("/api/invoices",{method:"POST",body}); logAudit(`Koostas arve ${res&&res.numberStr||""} · ${data.buyer.name}`); }
+        await hydrateInvoices(); }catch(e){ toast(e&&e.data&&e.data.error==="locked"?t("inv_locked_credited"):(LANG==="et"?"Serveri viga":"Ошибка сервера")); return; }
+      toast(t("inv_saved")); $("#modal-root").innerHTML=""; render(); return;
+    }
     if(existing){ if(existing.creditedBy){toast(t("inv_locked_credited"));return;}
       Object.assign(existing,{mode:data.mode,groupId:data.groupId,courseId:data.courseId,buyer:data.buyer,participants:data.participants,items:data.items,vatRate:data.vatRate,priceIncludesVat:data.priceIncludesVat,note:data.note,date:data.date,dueDate:data.dueDate});
       logAudit(`Muutis arvet ${existing.numberStr}`); toast(t("inv_saved")); }
@@ -5209,14 +5225,20 @@ function invoiceModal(id){
   draw();
 }
 
-function toggleInvoicePaid(id){ const iv=DB.invoices.find(x=>x.id===id); if(!iv)return;
-  iv.paid=!iv.paid; iv.paidDate=iv.paid?today():null;
+async function toggleInvoicePaid(id){ const iv=DB.invoices.find(x=>x.id===id); if(!iv)return;
+  const np=!iv.paid;
+  if(SERVER.mode==="server"){ try{ await api(`/api/invoices/${id}/paid`,{method:"PUT",body:{paid:np}}); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; } }
+  iv.paid=np; iv.paidDate=iv.paid?today():null;
   logAudit(`${iv.paid?"Märkis makstuks":"Eemaldas makstud"} arve ${iv.numberStr}`); render(); toast(iv.paid?t("inv_paid"):t("inv_unpaid")); }
 
 // Кредит-счёт (сторно): создаёт связанный документ с отрицательными суммами.
 function creditInvoice(id){
   const orig=DB.invoices.find(x=>x.id===id); if(!orig||orig.kind==="credit"||orig.creditedBy)return;
-  confirmModal(`${t("inv_credit_confirm")} ${orig.numberStr}?`,()=>{
+  confirmModal(`${t("inv_credit_confirm")} ${orig.numberStr}?`,async()=>{
+    if(SERVER.mode==="server"){ let creditId=null;
+      try{ const res=await api(`/api/invoices/${orig.id}/credit`,{method:"POST"}); if(res&&res.id)creditId=res.id; await hydrateInvoices(); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; }
+      logAudit(`Koostas kreeditarve → ${orig.numberStr}`); render(); toast(t("inv_credit_made"));
+      if(creditId)setTimeout(()=>generateInvoicePDF(creditId),150); return; }
     const n=nextInvoiceNumber();
     const credit={ id:uid("inv"), number:n, numberStr:invNumberStr(n), viitenumber:makeViitenumber(n),
       kind:"credit", creditOf:orig.id, mode:orig.mode, groupId:orig.groupId, courseId:orig.courseId,
@@ -5718,7 +5740,7 @@ function bindGlobal(){
   document.querySelectorAll("[data-inv-xml]").forEach(el=>el.onclick=()=>exportInvoiceXML(el.dataset.invXml));
   document.querySelectorAll("[data-inv-pdf]").forEach(el=>el.onclick=()=>generateInvoicePDF(el.dataset.invPdf));
   document.querySelectorAll("[data-inv-email]").forEach(el=>el.onclick=()=>emailInvoice(el.dataset.invEmail));
-  document.querySelectorAll("[data-inv-del]").forEach(el=>el.onclick=()=>{const iv=DB.invoices.find(x=>x.id===el.dataset.invDel);confirmModal((LANG==="et"?"Kustutada arve ":"Удалить счёт ")+(iv?.numberStr||"")+"?",()=>{DB.invoices=DB.invoices.filter(x=>x.id!==el.dataset.invDel);if(iv)logAudit(`Kustutas arve ${iv.numberStr}`);render();toast(t("inv_deleted"));});});
+  document.querySelectorAll("[data-inv-del]").forEach(el=>el.onclick=()=>{const iv=DB.invoices.find(x=>x.id===el.dataset.invDel);confirmModal((LANG==="et"?"Kustutada arve ":"Удалить счёт ")+(iv?.numberStr||"")+"?",async()=>{if(SERVER.mode==="server"){try{await api(`/api/invoices/${el.dataset.invDel}`,{method:"DELETE"});}catch(e){toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return;}}DB.invoices=DB.invoices.filter(x=>x.id!==el.dataset.invDel);if(iv)logAudit(`Kustutas arve ${iv.numberStr}`);render();toast(t("inv_deleted"));});});
   document.querySelectorAll("[data-export-inv]").forEach(el=>el.onclick=exportInvoices);
   const invS=$("#inv-search"); if(invS) invS.oninput=()=>{invFilter.q=invS.value;$(".main").innerHTML=invoicesView();bindGlobal();const f=$("#inv-search");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
   const invSt=$("#inv-status"); if(invSt) invSt.onchange=()=>{invFilter.status=invSt.value;render();};
