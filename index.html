@@ -3710,12 +3710,18 @@ function applyServerSession(me){
 function mapStudent(x){ return {id:x.id,firstName:x.first_name,lastName:x.last_name,isikukood:x.isikukood,email:x.email||"",groupId:x.group_id||"",courses:[],lastActive:x.last_active||null,completedAt:x.completed_at||null,archiveAt:x.archive_at||null,archived:!!x.archived}; }
 function mapStaff(x){ return {id:x.id,name:x.name,login:x.login,password:"",role:x.role||"teacher",perms:x.perms||{},groups:(x.scope_all||x.groups==="all"||!Array.isArray(x.groups))?"all":x.groups}; }
 async function hydrateStaff(){ try{ const st=await api("/api/staff"); if(Array.isArray(st)) DB.staff=st.map(mapStaff); }catch(e){} }
+function mapMeeting(x){ return {id:x.id,courseId:x.course_id,groupId:x.group_id,title:x.title||"",description:x.description||"",format:x.format||"online",link:x.link||"",address:x.address||"",date:x.date||"",time:x.time||"18:00",createdAt:x.created_at||"",attended:x.attended||{}}; }
+function mapMessage(x){ return {id:x.id,studentId:x.student_id,from:x.sender,text:x.text,ts:x.ts,read:!!x.read}; }
+async function hydrateMeetings(){ try{ const m=await api("/api/meetings"); if(Array.isArray(m)) DB.meetings=m.map(mapMeeting); }catch(e){} }
+async function hydrateMessages(){ try{ const m=await api("/api/messages"); if(Array.isArray(m)) DB.messages=m.map(mapMessage); }catch(e){} }
 async function hydrateReference(){
   try{ const st=await api("/api/settings"); mapSettings(st); }catch(e){}
   try{ const gs=await api("/api/groups"); if(Array.isArray(gs)) DB.groups=gs.map(g=>({id:g.id,name:g.name})); }catch(e){}
   try{ const studs=await api("/api/students"); if(Array.isArray(studs)) DB.students=studs.map(mapStudent); }catch(e){}
   try{ const cs=await api("/api/courses"); if(Array.isArray(cs)) DB.courses=cs; }catch(e){}
   await hydrateLearning();
+  await hydrateMeetings();
+  await hydrateMessages();
   if(DB.session&&DB.session.role==="admin") await hydrateStaff();
   if(DB.session&&DB.session.role!=="student") await hydrateRequests();
 }
@@ -4370,6 +4376,7 @@ function toggleNotifPanel(){
 function sendStudentMsg(){
   const s=currentStudent(); const inp=$("#chat-in"); const txt=inp.value.trim(); if(!txt)return;
   DB.messages.push({id:uid("msg"),studentId:s.id,from:"student",text:txt,ts:nowStr(),read:false});
+  if(SERVER.mode==="server"){ api("/api/messages",{method:"POST",body:{text:txt}}).catch(()=>{}); }
   touch(s.id); render(); const sc=$("#chat-scroll"); if(sc)sc.scrollTop=sc.scrollHeight; toast(t("msg_sent"));
 }
 
@@ -4437,10 +4444,13 @@ function meetingModal(id){
     document.querySelectorAll("[data-fmt]").forEach(el=>el.onclick=()=>{collect();data.format=el.dataset.fmt;draw();});
     const updRecip=()=>{collect();if(data.courseId&&data.groupId){const n=DB.students.filter(s=>s.groupId===data.groupId&&s.courses.includes(data.courseId)).length;$("#mt-recip").textContent=`📧 ${t("meet_recipients")}: ${n}`;}else $("#mt-recip").textContent="";};
     $("#mt-course").onchange=updRecip; $("#mt-group").onchange=updRecip; updRecip();
-    $("[data-mt-save]").onclick=()=>{collect();
+    $("[data-mt-save]").onclick=async()=>{collect();
       if(!data.courseId||!data.groupId||!data.date||!data.time||(data.format==="online"?!data.link.trim():!data.address.trim())){toast(LANG==="et"?"Täida kõik kohustuslikud väljad":"Заполните обязательные поля");return;}
-      if(editing){Object.assign(src,data);$("#modal-root").innerHTML="";render();toast(t("meet_saved"));}
-      else{DB.meetings.push(data);const c=courseById(data.courseId),g=groupById(data.groupId),recips=meetingRecipients(data);recips.forEach(s=>{const em=buildEmail("meet",{student:fullName(s),course:c.title,group:g.name,datetime:fmtDT(data),link:data.format==="offline"?data.address:data.link},()=>emailMeeting(c,g,data));queueEmail(s.email,em.s,em.b,"meet");pushNotif(s.id,`${LANG==="et"?"Uus kohtumine":"Новая встреча"}: ${fmtDT(data)}`,"meet","meetings");});logAudit(`Создал встречу для ${g.name} · ${fmtDT(data)}`);$("#modal-root").innerHTML="";render();toast(`${t("meet_created")} · 📧 ${recips.length} ${t("notif_queued")}`);}};
+      const body={course_id:data.courseId,group_id:data.groupId,title:data.title,description:data.description,format:data.format,link:data.link,address:data.address,date:data.date,time:data.time};
+      if(SERVER.mode==="server"){ try{ if(editing){ await api(`/api/meetings/${data.id}`,{method:"PUT",body}); } else { const res=await api("/api/meetings",{method:"POST",body}); if(res&&res.id)data.id=res.id; } await hydrateMeetings(); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; } }
+      if(editing){ if(SERVER.mode!=="server")Object.assign(src,data); $("#modal-root").innerHTML="";render();toast(t("meet_saved"));return; }
+      if(SERVER.mode!=="server")DB.meetings.push(data);
+      const c=courseById(data.courseId),g=groupById(data.groupId),recips=meetingRecipients(data);recips.forEach(s=>{const em=buildEmail("meet",{student:fullName(s),course:c.title,group:g.name,datetime:fmtDT(data),link:data.format==="offline"?data.address:data.link},()=>emailMeeting(c,g,data));queueEmail(s.email,em.s,em.b,"meet");pushNotif(s.id,`${LANG==="et"?"Uus kohtumine":"Новая встреча"}: ${fmtDT(data)}`,"meet","meetings");});logAudit(`Создал встречу для ${g.name} · ${fmtDT(data)}`);$("#modal-root").innerHTML="";render();toast(`${t("meet_created")} · 📧 ${recips.length} ${t("notif_queued")}`);};
     document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
   };
   draw();
@@ -4461,7 +4471,7 @@ function attendanceModal(id){
   document.querySelectorAll("[data-att]").forEach(el=>el.onchange=()=>{m.attended[el.dataset.att]=el.checked;$("#att-cnt").textContent=cnt();});
   $("[data-att-pdf]").onclick=()=>printAttendance(id);
   $("[data-att-csv]").onclick=()=>exportAttendance(id);
-  const close=()=>{$("#modal-root").innerHTML="";render();};
+  const close=async()=>{ if(SERVER.mode==="server"){ try{ await api(`/api/meetings/${id}/attendance`,{method:"POST",body:{attended:m.attended}}); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); } } $("#modal-root").innerHTML="";render();};
   $("[data-att-done]").onclick=close;
   document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)close();});
 }
@@ -4862,6 +4872,7 @@ function adminMessagesView(){
 function sendAdminMsg(sid){
   const inp=$("#adm-chat-in");const txt=inp.value.trim();if(!txt)return;
   DB.messages.push({id:uid("msg"),studentId:sid,from:"admin",text:txt,ts:nowStr(),read:false});
+  if(SERVER.mode==="server"){ api("/api/messages",{method:"POST",body:{student_id:sid,text:txt}}).catch(()=>{}); }
   view.thread=sid; render(); const sc=$("#chat-scroll");if(sc)sc.scrollTop=sc.scrollHeight;
 }
 
@@ -5715,7 +5726,9 @@ function bindGlobal(){
   document.querySelectorAll("[data-edit-meeting]").forEach(el=>el.onclick=()=>meetingModal(el.dataset.editMeeting));
   document.querySelectorAll("[data-att-meeting]").forEach(el=>el.onclick=()=>attendanceModal(el.dataset.attMeeting));
   document.querySelectorAll("[data-meettab]").forEach(el=>el.onclick=()=>{meetTab=el.dataset.meettab;render();});
-  document.querySelectorAll("[data-del-meeting]").forEach(el=>el.onclick=()=>{DB.meetings=DB.meetings.filter(m=>m.id!==el.dataset.delMeeting);render();});
+  document.querySelectorAll("[data-del-meeting]").forEach(el=>el.onclick=async()=>{const mid=el.dataset.delMeeting;
+    if(SERVER.mode==="server"){ try{ await api(`/api/meetings/${mid}`,{method:"DELETE"}); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; } }
+    DB.meetings=DB.meetings.filter(m=>m.id!==mid);render();});
   document.querySelectorAll("[data-thread]").forEach(el=>el.onclick=()=>{view.thread=el.dataset.thread;render();});
   document.querySelectorAll("[data-adm-send]").forEach(el=>el.onclick=()=>sendAdminMsg(el.dataset.admSend));
   const aci=$("#adm-chat-in"); if(aci)aci.onkeydown=e=>{if(e.key==="Enter"){const btn=$("[data-adm-send]");if(btn)sendAdminMsg(btn.dataset.admSend);}};
