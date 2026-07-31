@@ -80,6 +80,7 @@
   .btn.ok{background:var(--green);border-color:var(--green);color:#fff}
   .btn.ok:hover{background:var(--brand-2);border-color:var(--brand-2)}
   .btn.sm{padding:7px 12px;font-size:13px}
+  .btn.iconbtn{width:34px;height:34px;padding:0;justify-content:center;align-items:center;gap:0;font-size:15px;line-height:1}
   .btn:disabled{opacity:.42;cursor:not-allowed}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px}
@@ -3497,8 +3498,10 @@ function courseGradeItems(sid,c){
   });
   return items;
 }
-function courseAverage(sid,c){ const counted=courseGradeItems(sid,c).filter(i=>["graded","missing","overdue"].includes(i.state)&&typeof i.value==="number");
-  if(!counted.length)return null; return Math.round(counted.reduce((s,i)=>s+i.value,0)/counted.length); }
+// Числовое значение оценки для среднего балла: ARV = 100, MA = 0, число — как есть.
+function gradeNumeric(v){ if(typeof v==="number")return v; if(v==="ARV")return 100; if(v==="MA")return 0; return null; }
+function courseAverage(sid,c){ const counted=courseGradeItems(sid,c).filter(i=>["graded","missing","overdue"].includes(i.state)).map(i=>gradeNumeric(i.value)).filter(v=>v!==null);
+  if(!counted.length)return null; return Math.round(counted.reduce((s,v)=>s+v,0)/counted.length); }
 const isNumGrade=v=>typeof v==="number";
 function studentAverage(sid){ const s=studentById(sid); const arr=s.courses.map(cid=>courseAverage(sid,courseById(cid))).filter(v=>v!==null);
   if(!arr.length)return null; return Math.round(arr.reduce((a,b)=>a+b,0)/arr.length); }
@@ -3722,7 +3725,7 @@ function mapMeeting(x){ return {id:x.id,courseId:x.course_id,groupId:x.group_id,
 function mapMessage(x){ return {id:x.id,studentId:x.student_id,from:x.sender,text:x.text,ts:x.ts,read:!!x.read}; }
 async function hydrateMeetings(){ try{ const m=await api("/api/meetings"); if(Array.isArray(m)) DB.meetings=m.map(mapMeeting); }catch(e){} }
 async function hydrateMessages(){ try{ const m=await api("/api/messages"); if(Array.isArray(m)) DB.messages=m.map(mapMessage); }catch(e){} }
-function mapCert(x){ return {id:x.id,number:x.number,studentId:x.student_id,courseId:x.course_id,date:x.date,validUntil:x.valid_until||null,pdfKey:x.pdf_key||null}; }
+function mapCert(x){ return {id:x.id,number:x.number,studentId:x.student_id,courseId:x.course_id,date:x.date,validUntil:x.valid_until||null,pdfKey:x.pdf_key||null,signedKey:x.signed_key||null,signedName:x.signed_name||null,signedAt:x.signed_at||null}; }
 async function hydrateCerts(){ try{ const cs=await api("/api/certificates"); if(Array.isArray(cs)) DB.certificates=cs.map(mapCert); }catch(e){} }
 function mapInvoice(x){ return {id:x.id,number:x.number,numberStr:x.number_str,viitenumber:x.viitenumber||"",kind:x.kind||"invoice",creditOf:x.credit_of||null,creditedBy:x.credited_by||null,mode:x.mode||"group",groupId:x.group_id||"",courseId:x.course_id||"",buyer:{name:x.buyer_name||"",regCode:x.buyer_regcode||"",vatNo:x.buyer_vatno||"",address:x.buyer_address||"",email:x.buyer_email||""},participants:x.participants||[],items:(x.items||[]).map(it=>({desc:it.desc,qty:it.qty,price:it.price})),vatRate:x.vat_rate,priceIncludesVat:!!x.priceIncludesVat,showParticipants:x.showParticipants!==false,note:x.note||"",date:x.date,dueDate:x.due_date||"",paid:!!x.paid,paidDate:x.paid_date||null,createdAt:x.created_at||""}; }
 async function hydrateInvoices(){ try{ const iv=await api("/api/invoices"); if(Array.isArray(iv)) DB.invoices=iv.map(mapInvoice); }catch(e){} }
@@ -3840,7 +3843,7 @@ function authView(){
   return `<div class="auth-wrap">${authSide()}<div class="auth-main"><div class="auth-top">${langToggle()}</div>
     <div class="auth-box"><h1>${t("login_t")}</h1><div class="lead">${t("login_lead")}</div>
       <div class="field"><label>${t("f_login")}</label><input id="li-name" placeholder=""></div>
-      <div class="field"><label>${t("f_pass")}</label><input id="li-pass" type="password" placeholder="••••••••"></div>
+      <div class="field"><label>${t("f_pass")}</label><input id="li-pass" type="password" placeholder=""></div>
       <button class="btn primary" id="li-btn" style="width:100%;justify-content:center;margin-top:4px">${t("login_btn")}</button>
       <div style="margin-top:14px;font-size:13.5px;color:var(--muted)">${t("no_acc")} <span class="link" data-goreg>${t("reg_link")} →</span></div>
       <div style="margin-top:8px;font-size:13.5px"><span class="link" data-goverify>🔎 ${t("verify_link")}</span></div>
@@ -4226,7 +4229,7 @@ function studentCertsView(){
   return `${topbar(t("t_certs"),t("t_certs_s"))}<div class="content">
     ${certs.length?`<div class="grid">${certs.map(ct=>{const c=courseById(ct.courseId);
       return `<div class="card clk" data-viewcert="${ct.id}"><div class="cover" style="background:linear-gradient(135deg,${c.color}22,${c.color}0d)">🏆</div>
-      <div class="cbody"><span class="chip">${t("cert_no")}${String(ct.number).padStart(3,"0")} · ${fmtDate(ct.date)}</span><h3>${esc(c.title)}</h3><p>${t("cert_open")}</p></div></div>`;}).join("")}</div>`
+      <div class="cbody"><span class="chip">${t("cert_no")}${String(ct.number).padStart(3,"0")} · ${fmtDate(ct.date)}</span><h3>${esc(c.title)}</h3><p>${t("cert_open")}</p>${ct.signedKey?`<a href="${fileUrlFromKey(ct.signedKey)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="chip" style="margin-top:10px;display:inline-flex;gap:6px;background:var(--brand-soft);color:var(--brand);text-decoration:none;font-weight:600">🔏 ⬇ ${LANG==="et"?"Allkirjastatud fail":"Файл с подписью"}</a>`:""}</div></div>`;}).join("")}</div>`
       :emptyState("🏆",t("no_certs"),LANG==="et"?"Tunnistuse väljastab administraator pärast kursuse lõpetamist":"Сертификат выдаёт администратор после завершения курса")}</div>`;
 }
 // Круглая печать pulss. (SVG) — рендерится в html2canvas.
@@ -4336,40 +4339,64 @@ async function certPdfBase64(sid,cid){
   }catch(e){ return null; }
   finally{ document.body.removeChild(holder); }
 }
-// Отправить сертификат на почту: выбор PDF или подписанного файла (файл вкладывается обязательно).
+// Сертификат: отправить сгенерированный PDF письмом ИЛИ загрузить подписанный файл в кабинет ученика (+ уведомление).
 function emailCertModal(sid,cid){
   const s=studentById(sid),c=courseById(cid),ct=certFor(sid,cid);
   if(!s||!c||!ct){toast("—");return;}
   if(!s.email){toast(LANG==="et"?"Õpilasel pole e-posti":"У ученика нет e-mail");return;}
-  $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
-    <h2>${LANG==="et"?"Saada tunnistus":"Отправить сертификат"}</h2>
+  const nr=String(ct.number).padStart(3,"0");
+  const signedInfo=()=> ct.signedKey
+    ? `<div style="font-size:12.5px;color:var(--green);margin-top:10px;display:flex;align-items:center;gap:8px"><span>🔏 ${LANG==="et"?"Allkirjastatud fail on õpilase kontol":"Подписанный файл — в кабинете ученика"}</span><a href="${fileUrlFromKey(ct.signedKey)}" target="_blank" rel="noopener" style="color:var(--brand)">⬇ ${ct.signedName?esc(ct.signedName):(LANG==="et"?"ava":"открыть")}</a></div>`
+    : "";
+  $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" style="max-width:500px" onclick="event.stopPropagation()">
+    <h2>${LANG==="et"?"Tunnistus":"Сертификат"}</h2>
     <div class="msub">${esc(fullName(s))} · ${esc(c.title)} → ${esc(s.email)}</div>
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
-      <button class="btn" data-cert-send-pdf style="justify-content:flex-start">📄 ${LANG==="et"?"Saada genereeritud PDF":"Отправить сгенерированный PDF"}</button>
-      <button class="btn" data-cert-send-signed style="justify-content:flex-start">🔏 ${LANG==="et"?"Lisa allkirjastatud fail…":"Вложить подписанный файл…"}</button>
+      <button class="btn" data-cert-send-pdf style="justify-content:flex-start">📄 ${LANG==="et"?"Saada genereeritud PDF e-postiga":"Отправить сгенерированный PDF на почту"}</button>
+      <button class="btn" data-cert-upload-signed style="justify-content:flex-start">🔏 ${ct.signedKey?(LANG==="et"?"Asenda allkirjastatud fail…":"Заменить подписанный файл…"):(LANG==="et"?"Laadi allkirjastatud fail kontole…":"Загрузить подписанный файл в кабинет…")}</button>
     </div>
+    <div style="font-size:11.5px;color:var(--faint);margin-top:8px;line-height:1.5">${LANG==="et"?"Allkirjastatud fail (.asice/.bdoc/.pdf) salvestatakse õpilase kabinetti ja jääb ka administraatorile. Õpilasele läheb teavitus, et fail on kontol ja palume see 7 päeva jooksul alla laadida.":"Подписанный файл (.asice/.bdoc/.pdf) сохраняется в кабинете ученика и остаётся у администратора. Ученику уходит уведомление, что файл в кабинете и его нужно скачать в течение 7 дней."}</div>
+    <div id="cert-signed-info">${signedInfo()}</div>
     <div id="cert-send-status" style="font-size:13px;color:var(--muted);margin-top:12px;min-height:18px"></div>
     <div class="modal-foot"><button class="btn ghost" data-close>${t("close")}</button></div></div></div>`;
   const stat=$("#cert-send-status");
-  // attachment — вложить файл (PDF); link — ссылка на скачивание (подписанные .asice/.bdoc и т.п., которые Brevo не принимает во вложение).
-  const send=async(attachment,link)=>{
-    if((!attachment||!attachment.content)&&!link){ if(stat){stat.textContent=LANG==="et"?"Faili ei õnnestunud valmistada":"Не удалось подготовить файл";stat.style.color="var(--amber)";} return; }
-    if(stat){stat.textContent=LANG==="et"?"Saadan…":"Отправляю…";stat.style.color="var(--muted)";}
+  // 1) Отправить сгенерированный PDF вложением.
+  $("[data-cert-send-pdf]").onclick=async()=>{
+    if(stat){stat.textContent=LANG==="et"?"Valmistan PDF-i…":"Готовлю PDF…";stat.style.color="var(--muted)";}
+    const b64=await certPdfBase64(sid,cid);
+    if(!b64){ if(stat){stat.textContent=LANG==="et"?"PDF-i ei õnnestunud valmistada":"Не удалось подготовить PDF";stat.style.color="var(--amber)";} return; }
+    if(stat)stat.textContent=LANG==="et"?"Saadan…":"Отправляю…";
     const subj=LANG==="et"?`Tunnistus · ${c.title}`:`Сертификат · ${c.title}`;
-    const nr=String(ct.number).padStart(3,"0");
-    let body;
-    if(link){
-      body=LANG==="et"?`Tere, ${fullName(s)}!\n\nSinu tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}) on allalaadimiseks siin:\n${link}`:`Здравствуйте, ${fullName(s)}!\n\nВаш сертификат за курс «${c.title}» (№ ${nr}) можно скачать по ссылке:\n${link}`;
-    }else{
-      body=LANG==="et"?`Tere, ${fullName(s)}!\n\nManuses on Sinu tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}).`:`Здравствуйте, ${fullName(s)}!\n\nВо вложении ваш сертификат за курс «${c.title}» (№ ${nr}).`;
-    }
-    const r=await queueEmail(s.email,subj,body,"cert",attachment);
-    logAudit(`Saatis tunnistuse → ${s.email} · ${fullName(s)}`);
+    const body=LANG==="et"?`Tere, ${fullName(s)}!\n\nManuses on Sinu tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}).`:`Здравствуйте, ${fullName(s)}!\n\nВо вложении ваш сертификат за курс «${c.title}» (№ ${nr}).`;
+    const r=await queueEmail(s.email,subj,body,"cert",{name:`${fullName(s)} — tunnistus.pdf`,content:b64});
+    logAudit(`Saatis tunnistuse PDF → ${s.email} · ${fullName(s)}`);
     $("#modal-root").innerHTML="";
     toast(SERVER.mode==="server"?(r&&r.sent?`📧 ${LANG==="et"?"Saadetud":"Отправлено"}`:(LANG==="et"?"⚠ Saatmine ebaõnnestus":"⚠ Не удалось отправить")):"📧");
   };
-  $("[data-cert-send-pdf]").onclick=async()=>{ if(stat){stat.textContent=LANG==="et"?"Valmistan PDF-i…":"Готовлю PDF…";} const b64=await certPdfBase64(sid,cid); send(b64?{name:`${fullName(s)} — tunnistus.pdf`,content:b64}:null,null); };
-  $("[data-cert-send-signed]").onclick=()=>{ const inp=document.createElement("input"); inp.type="file"; inp.accept=".pdf,.asice,.bdoc,.ddoc,.edoc,application/pdf"; inp.onchange=async ()=>{ const f=inp.files[0]; if(!f)return; const isPdf=/\.pdf$/i.test(f.name)||f.type==="application/pdf"; if(isPdf){ if(stat){stat.textContent=LANG==="et"?"Laen faili…":"Загружаю файл…";} const rd=new FileReader(); rd.onload=()=>{ const uri=String(rd.result); const i=uri.indexOf("base64,"); const content=i>=0?uri.substring(i+7):null; send(content?{name:f.name,content}:null,null); }; rd.readAsDataURL(f); } else { if(stat){stat.textContent=LANG==="et"?"Laen faili üles…":"Загружаю файл…";} const meta=await uploadFileMeta(f); if(meta&&meta.url&&meta.key){ send(null,meta.url); } else { send(null,null); } } }; inp.click(); };
+  // 2) Загрузить подписанный файл в кабинет ученика + уведомление на почту.
+  $("[data-cert-upload-signed]").onclick=()=>{
+    const inp=document.createElement("input"); inp.type="file"; inp.accept=".pdf,.asice,.bdoc,.ddoc,.edoc,application/pdf";
+    inp.onchange=async ()=>{
+      const f=inp.files[0]; if(!f)return;
+      if(stat){stat.textContent=LANG==="et"?"Laen faili üles…":"Загружаю файл…";stat.style.color="var(--muted)";}
+      const meta=await uploadFileMeta(f);
+      if(!meta||!meta.key){ if(stat){stat.textContent=LANG==="et"?"Üleslaadimine ebaõnnestus (fail on liiga suur või server ei vastanud)":"Не удалось загрузить (файл слишком большой или сервер не ответил)";stat.style.color="var(--amber)";} return; }
+      if(SERVER.mode==="server"){ try{ await api(`/api/certificates/${ct.id}/signed`,{method:"POST",body:{signed_key:meta.key,signed_name:f.name}}); }catch(e){ if(stat){stat.textContent=LANG==="et"?"Serveri viga":"Ошибка сервера";stat.style.color="var(--amber)";} return; } }
+      ct.signedKey=meta.key; ct.signedName=f.name; ct.signedAt=nowStr();
+      if(stat)stat.textContent=LANG==="et"?"Saadan teavituse…":"Отправляю уведомление…";
+      const subj=LANG==="et"?`Allkirjastatud tunnistus on Sinu kontol · ${c.title}`:`Сертификат с подписью в вашем кабинете · ${c.title}`;
+      const portal=location.origin;
+      const body=LANG==="et"
+        ? `Tere, ${fullName(s)}!\n\nSinu digitaalselt allkirjastatud tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}) on lisatud Sinu kontole platvormil.\n\nPalun logi sisse ja laadi see alla 7 päeva jooksul:\n${portal}\n\nLugupidamisega,\n${brandName()}`
+        : `Здравствуйте, ${fullName(s)}!\n\nВаш сертификат с цифровой подписью за курс «${c.title}» (№ ${nr}) добавлен в ваш личный кабинет на платформе.\n\nПожалуйста, войдите и скачайте его в течение 7 дней:\n${portal}\n\nС уважением,\n${brandName()}`;
+      const r=await queueEmail(s.email,subj,body,"cert",null);
+      logAudit(`Lisas allkirjastatud tunnistuse kontole + teavitas → ${s.email} · ${fullName(s)}`);
+      $("#modal-root").innerHTML="";
+      render();
+      toast(SERVER.mode==="server"?(r&&r.sent?`🔏 ${LANG==="et"?"Lisatud, teade saadetud":"Добавлено, уведомление отправлено"}`:(LANG==="et"?"🔏 Lisatud (teade ebaõnnestus)":"🔏 Добавлено (уведомление не ушло)")):"🔏 ✓");
+    };
+    inp.click();
+  };
   document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
 }
 async function generateCertPDF(sid,cid){
@@ -5016,11 +5043,12 @@ function adminCertsView(){
       <td style="min-width:150px"><div style="display:flex;align-items:center;gap:10px"><div class="progress-track" style="flex:1"><div class="progress-fill" style="width:${pr.pct}%"></div></div><span style="font-size:12px;color:var(--muted)">${pr.pct}%</span></div></td>
       <td style="text-align:right;white-space:nowrap">${ct
         ?`<span class="badge graded" style="margin-right:6px">✓ ${t("cert_no")}${String(ct.number).padStart(3,"0")}</span>
-          <button class="btn sm" data-cert-view="${key}" title="${t("view")}">👁</button>
-          <button class="btn sm" data-cert-print="${key}" title="${t("cert_print")}">🖨</button>
-          <button class="btn sm" data-cert-dl="${key}" title="${t("cert_dl")}">⬇</button>
-          <button class="btn sm" data-cert-email="${key}" title="${LANG==="et"?"Saada e-postiga":"Отправить на почту"}">✉</button>
-          <button class="btn danger sm" data-cert-del="${key}" title="${t("cert_delete")}">✕</button>`
+          <button class="btn sm iconbtn" data-cert-view="${key}" title="${t("view")}">👁</button>
+          <button class="btn sm iconbtn" data-cert-print="${key}" title="${t("cert_print")}">🖨</button>
+          <button class="btn sm iconbtn" data-cert-dl="${key}" title="${t("cert_dl")}">⬇</button>
+          ${ct.signedKey?`<a class="btn sm iconbtn" href="${fileUrlFromKey(ct.signedKey)}" target="_blank" rel="noopener" title="${LANG==="et"?"Ava allkirjastatud fail":"Открыть подписанный файл"}">🔏</a>`:""}
+          <button class="btn sm iconbtn" data-cert-email="${key}" title="${LANG==="et"?"Saada e-postiga":"Отправить на почту"}">✉</button>
+          <button class="btn danger sm iconbtn" data-cert-del="${key}" title="${t("cert_delete")}">✕</button>`
         :`<button class="btn ${done?"primary":""} sm" data-issue="${key}" title="${done?"":t("not_ready")}">🖋️ ${t("issue_cert")}${done?"":" ⚠"}</button>`}</td></tr>`;}).join("")}
   </tbody></table>`:emptyState("🏆",t("no_students"))}`;
   let reg=[...DB.certificates].sort((a,b)=>a.number-b.number).filter(ct=>scope.has(ct.studentId)&&matchS(studentById(ct.studentId)));
@@ -5028,11 +5056,12 @@ function adminCertsView(){
     ${reg.map(ct=>{const s=studentById(ct.studentId);const c=courseById(ct.courseId);const key=`${ct.studentId}:${ct.courseId}`;
       return `<tr><td><b>${t("cert_no")}${String(ct.number).padStart(3,"0")}</b></td><td>${esc(fullName(s))}</td>
       <td style="color:var(--muted)">${esc(s.isikukood)}</td><td>${esc(c.title)}</td><td style="color:var(--muted)">${fmtDate(ct.date)}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-cert-view="${key}" title="${t("view")}">👁</button>
-        <button class="btn sm" data-cert-print="${key}" title="${t("cert_print")}">🖨</button>
-        <button class="btn sm" data-cert-dl="${key}" title="${t("cert_dl")}">⬇</button>
-        <button class="btn sm" data-cert-email="${key}" title="${LANG==="et"?"Saada e-postiga":"Отправить на почту"}">✉</button>
-        <button class="btn danger sm" data-cert-del="${key}" title="${t("cert_delete")}">✕</button></td></tr>`;}).join("")}
+      <td style="text-align:right;white-space:nowrap"><button class="btn sm iconbtn" data-cert-view="${key}" title="${t("view")}">👁</button>
+        <button class="btn sm iconbtn" data-cert-print="${key}" title="${t("cert_print")}">🖨</button>
+        <button class="btn sm iconbtn" data-cert-dl="${key}" title="${t("cert_dl")}">⬇</button>
+        ${ct.signedKey?`<a class="btn sm iconbtn" href="${fileUrlFromKey(ct.signedKey)}" target="_blank" rel="noopener" title="${LANG==="et"?"Ava allkirjastatud fail":"Открыть подписанный файл"}">🔏</a>`:""}
+        <button class="btn sm iconbtn" data-cert-email="${key}" title="${LANG==="et"?"Saada e-postiga":"Отправить на почту"}">✉</button>
+        <button class="btn danger sm iconbtn" data-cert-del="${key}" title="${t("cert_delete")}">✕</button></td></tr>`;}).join("")}
   </tbody></table>`:emptyState("🏆",t("no_reg"))}`;
   return `${topbar(t("t_certsA"),t("t_certsA_s"))}<div class="content" style="max-width:1040px">
     <div class="tabs"><button class="tab ${certTab==="issue"?"on":""}" data-certtab="issue">${t("tab_issue")}</button>
@@ -5111,11 +5140,17 @@ function invoicesView(){
       : iv.creditedBy ? `<span class="badge gray">⊘ ${t("inv_credited")}</span>`
       : iv.paid ? `<span class="badge green">✓ ${t("inv_paid")}</span>${iv.paidDate?`<div style="font-size:11px;color:var(--faint)">${fmtDate(iv.paidDate)}</div>`:""}`
       : (od>0 ? `<span class="badge late">⏰ ${t("inv_unpaid")}</span><div style="font-size:11px;color:var(--red)">+${od} ${LANG==="et"?"p":"дн"}</div>` : `<span class="badge amber">● ${t("inv_unpaid")}</span>`);
+    const isOverdue=!isCredit&&!iv.paid&&od>0;
+    const dueCell = (isCredit||!iv.dueDate)
+      ? `<span style="color:var(--faint)">—</span>`
+      : (isOverdue
+          ? `<span style="color:var(--red);font-weight:700">${fmtDate(iv.dueDate)}</span><div style="font-size:11px;color:var(--red)">+${od} ${LANG==="et"?"p üle":"дн просроч."}</div>`
+          : `<span>${fmtDate(iv.dueDate)}</span>`);
     return `<tr${isCredit?` style="background:var(--surface-2)"`:""}>
-      <td><b>${esc(iv.numberStr)}</b>${isCredit?` <span style="font-size:11px;color:var(--faint)">↩${esc(DB.invoices.find(x=>x.id===iv.creditOf)?.numberStr||"")}</span>`:""}<div style="font-size:12px;color:var(--faint)">${fmtDate(iv.date)}</div><div style="font-size:11px;color:var(--faint)" title="${t("inv_refno")}">${t("inv_refno")}: ${esc(iv.viitenumber||"—")}</div></td>
-      <td><b style="font-weight:600">${esc(iv.buyer?.name||"—")}</b><div style="font-size:12px;color:var(--faint)">${subject}</div>
-        ${iv.dueDate&&!isCredit?`<div style="font-size:11.5px;color:var(--faint)">${LANG==="et"?"Maksetähtaeg":"Срок оплаты"}: ${fmtDate(iv.dueDate)}</div>`:""}</td>
+      <td><b>${esc(iv.numberStr)}</b>${isCredit?` <span style="font-size:11px;color:var(--faint)">↩${esc(DB.invoices.find(x=>x.id===iv.creditOf)?.numberStr||"")}</span>`:""}<div style="font-size:12px;color:var(--faint)">${fmtDate(iv.date)}</div></td>
+      <td><b style="font-weight:600">${esc(iv.buyer?.name||"—")}</b></td>
       <td style="white-space:nowrap"><b style="${isCredit?"color:var(--red)":""}">${money(invGross(iv))}</b><div style="font-size:11.5px;color:var(--faint)">${t("inv_vat")}: ${money(invVat(iv))}</div></td>
+      <td style="white-space:nowrap">${dueCell}</td>
       <td>${statusCell}</td>
       <td style="text-align:right;white-space:nowrap">
         ${isCredit?"":`<button class="btn sm" data-inv-paid="${iv.id}" ${iv.creditedBy?"disabled":""}>${iv.paid?t("inv_mark_unpaid"):t("inv_mark_paid")}</button>`}
@@ -5129,7 +5164,7 @@ function invoicesView(){
   const totOut=scopedInvoices().filter(invIsOpen).reduce((a,iv)=>a+invGross(iv),0);
   return `${topbar(t("t_invoices"),t("t_invoices_s"))}<div class="content" style="max-width:1080px">
     ${tabs}${toolbar}
-    ${list.length?`<table class="table"><thead><tr><th>${t("inv_no")}</th><th>${t("inv_buyer")}</th><th>${t("inv_sum")}</th><th>${t("inv_status")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    ${list.length?`<table class="table"><thead><tr><th>${t("inv_no")}</th><th>${t("inv_buyer")}</th><th>${t("inv_sum")}</th><th>${t("inv_due")}</th><th>${t("inv_status")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>
       <div style="margin-top:14px;display:flex;justify-content:space-between;align-items:center">
         <div style="color:var(--muted);font-size:13.5px">${t("rep_outstanding")}: <b style="color:var(--amber)">${money(totOut)}</b></div>
         <button class="btn primary" data-new-invoice>＋ ${t("new_invoice")}</button></div>`
@@ -5572,7 +5607,7 @@ function settingsView(){
   const s=DB.settings;
   const avail=settingsTabs();
   if(!avail.some(x=>x[0]===settingsTab))settingsTab=avail[0][0];
-  const tabbar=`<div class="tabs" style="margin-bottom:20px;flex-wrap:nowrap;overflow-x:auto;white-space:nowrap">${avail.map(([k,ic,lbl])=>`<button class="tab ${settingsTab===k?"on":""}" data-settab="${k}" style="flex:0 0 auto">${ic} ${lbl}</button>`).join("")}</div>`;
+  const tabbar=`<div class="tabs" style="margin-bottom:20px;flex-wrap:nowrap;white-space:nowrap;gap:8px;width:100%">${avail.map(([k,ic,lbl])=>`<button class="tab ${settingsTab===k?"on":""}" data-settab="${k}" style="flex:1 1 0;min-width:0;justify-content:center;text-align:center">${ic} ${lbl}</button>`).join("")}</div>`;
   let body="";
   if(settingsTab==="general"){
     body=`<div class="module" style="padding:22px 24px">
