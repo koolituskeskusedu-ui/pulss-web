@@ -3520,7 +3520,9 @@ function meetingRecipients(m){ return DB.students.filter(s=>s.groupId===m.groupI
 function fmtDT(m){ return `${fmtDate(m.date)}, ${m.time}`; }
 
 /* --- уведомления (демо-очередь писем, почту подключим позже) --- */
-function queueEmail(to,subject,body,type){ DB.outbox.unshift({id:uid("em"),to,subject,body,ts:nowStr(),type:type||"info"}); }
+function queueEmail(to,subject,body,type){ DB.outbox.unshift({id:uid("em"),to,subject,body,ts:nowStr(),type:type||"info"});
+  if(SERVER.mode==="server"&&to){ return api("/api/outbox",{method:"POST",body:{to,subject,body,type:type||"info"}}).catch(()=>null); }
+  return Promise.resolve(null); }
 function notifyList(students,subject,body,type){ students.forEach(s=>queueEmail(s.email,subject,body,type)); return students.length; }
 function emailHwAdded(c,h){ return {s:`Uus kodutöö · ${c.title}`, b:`Kursusele "${c.title}" lisati kodutöö "${h.title}". Tähtaeg: ${h.deadline?fmtDate(h.deadline):"—"}.`}; }
 function emailGraded(c,h,grade){ return {s:`Töö hinnatud · ${c.title}`, b:`Sinu töö "${h.title}" on hinnatud: ${grade}.`}; }
@@ -5338,14 +5340,15 @@ async function generateInvoicePDF(id){
   finally{ document.body.removeChild(holder); }
 }
 
-function emailInvoice(id){
+async function emailInvoice(id){
   const iv=DB.invoices.find(x=>x.id===id); if(!iv)return;
   if(!iv.buyer?.email){ toast(t("inv_no_buyer_email")); invoiceModal(id); return; }
   const vars={ number:iv.numberStr, seller:DB.settings.seller?.name||brandName(), gross:money(invGross(iv)).replace(" €"," €"), due:fmtDateNum(iv.dueDate) };
   const em=buildEmail("invoice",vars,()=>({s:`Arve ${iv.numberStr}`,b:`Lisatud arve ${iv.numberStr} summas ${money(invGross(iv))}. Maksetähtaeg: ${fmtDateNum(iv.dueDate)}.`}));
-  queueEmail(iv.buyer.email,em.s,em.b,"invoice");
+  const r=await queueEmail(iv.buyer.email,em.s,em.b,"invoice");
   logAudit(`Saatis arve ${iv.numberStr} → ${iv.buyer.email}`);
-  toast(t("inv_emailed"));
+  if(SERVER.mode==="server") toast(r&&r.sent?`📧 ${t("inv_emailed")}`:(LANG==="et"?"⚠ Saatmine ebaõnnestus":"⚠ Не удалось отправить"));
+  else toast(t("inv_emailed"));
 }
 
 function exportInvoices(){
