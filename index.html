@@ -3655,7 +3655,11 @@ function icsEscape(s){ return String(s||"").replace(/([,;\\])/g,"\\$1").replace(
 /* =====================================================================
    ПОДКЛЮЧЕНИЕ К СЕРВЕРУ (Cloudflare Worker API) — Фаза 1
    ===================================================================== */
-const API_BASE="https://pulss-api.koolituskeskusedu.workers.dev";
+// Адрес API выбирается по домену: на своём домене — свой API, иначе — старый workers.dev.
+// Это позволяет одному и тому же index.html работать и на новом домене, и на старом.
+const API_BASE=(location.hostname||"").endsWith("pulss-koolitus.ee")
+  ? "https://api.esmaabi.pulss-koolitus.ee"
+  : "https://pulss-api.koolituskeskusedu.workers.dev";
 let SERVER={ online:false, mode:"demo" };  // mode: "server" | "demo"
 async function api(path,{method="GET",body=null}={}){
   const res=await fetch(API_BASE+path,{
@@ -3786,7 +3790,32 @@ async function serverLogout(){ try{ if(SERVER.mode==="server") await api("/api/l
 
 /* ============ Роутинг ============ */
 let view={ name:"login" };
-function go(name,extra={}){ view={name,...extra}; render(); window.scrollTo(0,0); }
+/* ---- URL-роутинг (хэш): каждая страница получает свой адрес, F5 остаётся на месте ---- */
+const HASH_KEYS=["courseId","lessonId","thread"];
+const NO_HASH=["login","register","verify"];
+function viewToHash(v){ if(!v||!v.name||NO_HASH.includes(v.name)) return "";
+  const q=HASH_KEYS.filter(k=>v[k]).map(k=>k+"="+encodeURIComponent(v[k]));
+  return "#"+encodeURIComponent(v.name)+(q.length?"?"+q.join("&"):""); }
+function parseHash(){ const h=(location.hash||"").replace(/^#\/?/,""); if(!h) return null;
+  const [n,qs]=h.split("?"); const v={name:decodeURIComponent(n)};
+  if(qs)qs.split("&").forEach(p=>{const[k,val]=p.split("=");if(k)v[k]=decodeURIComponent(val||"");});
+  return v; }
+let _hashLock=false;
+function restoreView(v){
+  let nv={...v};
+  if(["course","lesson","admin-edit"].includes(nv.name)&&(!nv.courseId||!courseById(nv.courseId)))
+    nv={name:DB.session&&DB.session.role==="student"?"my-courses":"admin-courses"};
+  try{ view=nv; render(); window.scrollTo(0,0); }
+  catch(e){ go(DB.session&&DB.session.role==="student"?"my-courses":"dashboard"); }
+}
+function go(name,extra={}){ view={name,...extra}; render(); window.scrollTo(0,0);
+  const h=viewToHash(view);
+  if(location.hash!==h){ _hashLock=true;
+    try{ if(h) location.hash=h; else if(location.hash) history.replaceState(null,"",location.pathname+location.search); }catch(e){}
+  }
+}
+window.addEventListener("hashchange",()=>{ if(_hashLock){ _hashLock=false; return; }
+  if(!DB.session) return; const v=parseHash(); if(v&&v.name) restoreView(v); });
 function setLang(l){ LANG=l; document.documentElement.lang=l; render(); }
 
 /* =====================================================================
@@ -3835,17 +3864,16 @@ function verifyView(){
   let res="";
   if(verifyResult){
     if(verifyResult.ok){
-      const {ct,student,course}=verifyResult; const vu=certValidUntil(ct); const expired=today()>vu;
+      const v=verifyResult.srv; const expired=!!v.expired;
       res=`<div style="margin-top:22px;border:1.5px solid ${expired?"var(--amber)":"var(--green)"};background:${expired?"var(--amber-soft)":"var(--green-soft)"};border-radius:14px;padding:20px 22px">
         <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--green)"><span style="font-size:22px">✅</span>${t("sig_valid")}</div>
         <div style="margin-top:14px;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px">
-          <span style="color:var(--muted)">${t("reg_number")}</span><b>№${String(ct.number).padStart(3,"0")}</b>
-          <span style="color:var(--muted)">${t("col_name")}</span><b>${esc(fullName(student))}</b>
-          <span style="color:var(--muted)">Isikukood</span><b>${esc(student.isikukood)}</b>
-          <span style="color:var(--muted)">${t("f_course")}</span><b>${esc(course.title)}</b>
-          <span style="color:var(--muted)">${t("issued_to")}</span><b>${fmtDate(ct.date)}</b></div>
+          <span style="color:var(--muted)">${t("reg_number")}</span><b>№${String(v.number).padStart(3,"0")}</b>
+          <span style="color:var(--muted)">${t("col_name")}</span><b>${esc(v.name||"")}</b>
+          <span style="color:var(--muted)">${t("f_course")}</span><b>${esc(v.course||"")}</b>
+          <span style="color:var(--muted)">${t("issued_to")}</span><b>${v.date?fmtDate(v.date):"—"}</b></div>
         <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(0,0,0,.08);font-weight:700;color:${expired?"var(--red)":"var(--green)"}">
-          ${expired?"⛔ "+t("cert_expired"):"🗓️ "+t("cert_valid_until")+": "+fmtDate(vu)}</div></div>`;
+          ${expired?"⛔ "+t("cert_expired"):(v.validUntil?"🗓️ "+t("cert_valid_until")+": "+fmtDate(v.validUntil):"")}</div></div>`;
     } else {
       res=`<div style="margin-top:22px;border:1.5px solid var(--red);background:var(--red-soft);border-radius:14px;padding:20px 22px">
         <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--red)"><span style="font-size:22px">⛔</span>${t("sig_invalid")}</div>
@@ -3854,20 +3882,21 @@ function verifyView(){
   }
   return `<div class="auth-wrap">${authSide()}<div class="auth-main"><div class="auth-top">${langToggle()}</div>
     <div class="auth-box"><h1>${t("verify_t")}</h1><div class="lead">${t("verify_lead")}</div>
-      <div class="field"><label>${t("vf_num")}</label><input id="vf-num" placeholder="001"></div>
-      <div class="field"><label>${t("vf_last")}</label><input id="vf-last" placeholder="Ковалёва"></div>
+      <div class="field"><label>${t("vf_num")}</label><input id="vf-num" placeholder=""></div>
+      <div class="field"><label>${t("vf_last")}</label><input id="vf-last" placeholder=""></div>
       <button class="btn primary" id="vf-btn" style="width:100%;justify-content:center;margin-top:4px">🔎 ${t("verify_btn")}</button>
       ${res}
       <div style="margin-top:16px;font-size:13.5px"><span class="link" data-gologin>${t("back_login")}</span></div>
     </div></div></div>`;
 }
-function runVerify(){
-  const num=parseInt(($("#vf-num").value||"").replace(/\D/g,""),10);
-  const last=($("#vf-last").value||"").trim().toLowerCase();
-  const ct=DB.certificates.find(c=>c.number===num);
-  const student=ct?studentById(ct.studentId):null;
-  if(ct&&student&&last&&student.lastName.toLowerCase()===last) verifyResult={ok:true,ct,student,course:courseById(ct.courseId)};
-  else verifyResult={ok:false};
+async function runVerify(){
+  const num=parseInt(($("#vf-num").value||"").replace(/\D/g,""),10);   // «001», «nr 1», «№1» → 1
+  const last=($("#vf-last").value||"").trim();
+  if(!num){ verifyResult={ok:false}; render(); return; }
+  try{
+    const r=await api(`/api/verify?number=${num}&last=${encodeURIComponent(last)}`);
+    verifyResult=(r&&r.ok)?{ok:true,srv:r}:{ok:false};
+  }catch(e){ verifyResult={ok:false}; }
   render();
 }
 function bindAuth(){
@@ -4795,20 +4824,22 @@ function adminGroupsView(){
 }
 
 /* ---------- ADMIN: gradebook ---------- */
-let gbSel={course:"c1",group:""};
+let gbSel={course:"c1",group:"",q:""};
 function gradebookView(){
   if(!courseById(gbSel.course)) gbSel.course=DB.courses[0]?.id;
   const c=courseById(gbSel.course);
   const hwCols=(c?.homework||[]).map(h=>({id:h.id,title:h.title,kind:"hw"}));
   const qCols=quizLessons(c||{modules:[]}).map(l=>({id:l.id,title:l.title,kind:"quiz"}));
   const cols=[...hwCols,...qCols];
-  let studs=scopedStudents().filter(s=>s.courses.includes(gbSel.course));
+  let studs=scopedStudents().filter(s=>s.courses.includes(gbSel.course)&&studentStatus(s)==="active");
   if(gbSel.group) studs=studs.filter(s=>s.groupId===gbSel.group);
+  const gq=gbSel.q.toLowerCase().trim(); if(gq) studs=studs.filter(s=>fullName(s).toLowerCase().includes(gq));
   const cellFor=(sid)=>{ const items=courseGradeItems(sid,c); const map={}; items.forEach(i=>map[i.id]=i); return map; };
   return `${topbar(t("t_gradebook"),t("t_gradebook_s"))}<div class="content">
-    <div class="toolbar">
+    <div class="toolbar" style="flex-wrap:wrap">
       <select class="sel-mini" id="gb-course">${DB.courses.map(x=>`<option value="${x.id}" ${gbSel.course===x.id?"selected":""}>${esc(x.title)}</option>`).join("")}</select>
       <select class="sel-mini" id="gb-group"><option value="">${t("all_groups")}</option>${scopedGroups().map(g=>`<option value="${g.id}" ${gbSel.group===g.id?"selected":""}>${esc(g.name)}</option>`).join("")}</select>
+      <div class="search"><input id="gb-search" placeholder="${LANG==="et"?"Otsi õpilast…":"Поиск ученика…"}" value="${esc(gbSel.q)}"></div>
       <button class="btn sm" data-export-gb>⬇ ${t("export_csv")}</button>
       <span style="font-size:12.5px;color:var(--faint)">${t("jl_hint")}</span></div>
     ${studs.length&&cols.length?`<div style="overflow-x:auto"><table class="jtable"><thead><tr>
@@ -4961,7 +4992,8 @@ function adminCertsView(){
     ${certTab==="issue"?`<select class="sel-mini" id="cert-group"><option value="">${t("all_groups")}</option>${scopedGroups().map(g=>`<option value="${g.id}" ${certFilter.group===g.id?"selected":""}>${esc(g.name)}</option>`).join("")}</select>`:`<button class="btn sm" data-export-reg>⬇ ${t("export_csv")}</button>`}</div>`;
   const scope=scopedStudentIds();
   let rows=[]; scopedStudents().forEach(s=>s.courses.forEach(cid=>{const c=courseById(cid);if(c)rows.push({s,c});}));
-  rows=rows.filter(({s})=>{ if(certFilter.group&&s.groupId!==certFilter.group)return false; return matchS(s); });
+  rows=rows.filter(({s,c})=>{ if(certFilter.group&&s.groupId!==certFilter.group)return false; if(!matchS(s))return false;
+    if(s.archived&&!isCourseComplete(s.id,c)&&!certFor(s.id,c.id))return false; return true; });
   const readyKeys=rows.filter(({s,c})=>isCourseComplete(s.id,c)&&!certFor(s.id,c.id)).map(({s,c})=>`${s.id}:${c.id}`);
   const selReady=readyKeys.filter(k=>certSel.has(k));
   const bulkBar=selReady.length?`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 14px;background:var(--brand-soft);border:1px solid #BEDCCB;border-radius:8px">
@@ -4982,7 +5014,7 @@ function adminCertsView(){
           <button class="btn sm" data-cert-dl="${key}" title="${t("cert_dl")}">⬇</button>
           <button class="btn sm" data-cert-email="${key}" title="${LANG==="et"?"Saada e-postiga":"Отправить на почту"}">✉</button>
           <button class="btn danger sm" data-cert-del="${key}" title="${t("cert_delete")}">✕</button>`
-        :done?`<button class="btn primary sm" data-issue="${key}">🖋️ ${t("issue_cert")}</button>`:`<span class="badge gray">${t("not_ready")}</span>`}</td></tr>`;}).join("")}
+        :`<button class="btn ${done?"primary":""} sm" data-issue="${key}" title="${done?"":t("not_ready")}">🖋️ ${t("issue_cert")}${done?"":" ⚠"}</button>`}</td></tr>`;}).join("")}
   </tbody></table>`:emptyState("🏆",t("no_students"))}`;
   let reg=[...DB.certificates].sort((a,b)=>a.number-b.number).filter(ct=>scope.has(ct.studentId)&&matchS(studentById(ct.studentId)));
   const registryTab=`${toolbar}${reg.length?`<table class="table"><thead><tr><th>${t("reg_number")}</th><th>${t("col_student")}</th><th>Isikukood</th><th>${t("f_course")}</th><th>${t("reg_issued_on")}</th><th></th></tr></thead><tbody>
@@ -5003,7 +5035,7 @@ function adminCertsView(){
 async function bulkIssueCerts(keys){
   let n=0; for(const k of keys){const[sid,cid]=k.split(":");if(!certFor(sid,cid)&&isCourseComplete(sid,courseById(cid))){const r=await issueCert(sid,cid,true);if(r)n++;}}
   certSel.clear(); render();
-  showInfoModal("🖋️",`${t("bulk_issue_n")}: ${n}`,null,t("cert_digi_msg"));
+  toast(`🖋️ ${t("bulk_issue_n")}: ${n}`);
 }
 async function issueCert(sid,cid,silent){
   if(certFor(sid,cid))return null;
@@ -5014,7 +5046,7 @@ async function issueCert(sid,cid,silent){
   const s=studentById(sid); s.completedAt=today(); s.archiveAt=addDays(today(),DB.settings.archiveDays);
   pushNotif(sid,`${LANG==="et"?"Tunnistus väljastatud (digiallkirjastamisel)":"Сертификат выдан (на подписании)"}: ${courseById(cid)?.title||""}`,"cert","student-certs");
   logAudit(`Väljastas tunnistuse №${String(number).padStart(3,"0")} — ${fullName(s)} · ${courseById(cid)?.title||""}`);
-  if(!silent){ render(); showInfoModal("🖋️",t("cert_digi_title"),null,t("cert_digi_msg")); }
+  if(!silent){ render(); }
   return number;
 }
 function revokeCert(sid,cid){
@@ -5171,16 +5203,17 @@ function invoiceModal(id){
   if(data.priceIncludesVat===undefined)data.priceIncludesVat=false;
   if(data.vatRate===undefined)data.vatRate=24;
   let lookupResults=[];
+  // Два режима: "group" (за группу+курс, с участниками) и "free" (свободный счёт без групп).
+  if(existing && data.mode!=="group") data.mode="free";
+  if(data.payerType===undefined) data.payerType = (data.buyer.vatNo ? "company" : (/^\d{11}$/.test(data.buyer.regCode||"") ? "private" : "company"));
   const participantsFor=()=>{
     if(data.mode==="group"){ return DB.students.filter(s=>s.groupId===data.groupId).map(s=>({studentId:s.id,name:fullName(s),isikukood:s.isikukood})); }
-    if(data.mode==="private"){ return data.buyer.name?[{studentId:null,name:data.buyer.name,isikukood:data.__privIk||""}]:[]; }
-    const s=studentById(data.__studentId); return s?[{studentId:s.id,name:fullName(s),isikukood:s.isikukood}]:[];
+    return [];
   };
   const syncParticipants=()=>{ data.participants=participantsFor(); };
   const ensureItems=()=>{ if(!data.items.length){ const cnt=data.participants.length||1; const course=courseById(data.courseId);
-    data.items=[{desc:(course?course.title:t("inv_default_desc")),qty:cnt,price:DB.settings.invoiceDefaultPrice||0}]; } };
+    data.items=[{desc:(data.mode==="group"&&course?course.title:t("inv_default_desc")),qty:(data.mode==="group"?cnt:1),price:DB.settings.invoiceDefaultPrice||0}]; } };
   if(!existing){ syncParticipants(); ensureItems(); }
-  else if(existing.mode==="individual"){ data.__studentId=existing.participants[0]?.studentId||""; }
 
   const draw=()=>{
     const net=invNet(data),vat=invVat(data),gross=invGross(data);
@@ -5191,13 +5224,14 @@ function invoiceModal(id){
       ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${data.participants.map(p=>`<span class="badge gray" style="font-weight:500">${esc(p.name)}</span>`).join("")}</div>`
       : `<div style="color:var(--red);font-size:13px">${t("inv_no_participants")}</div>`;
     const vatOpts=[0,22,24].map(r=>`<option value="${r}" ${(+data.vatRate)===r?"selected":""}>${r}%</option>`).join("");
-    const itemsHead=`<div class="row" style="gap:8px;margin-bottom:4px;font-size:11.5px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.3px">
-      <div style="flex:2">${t("inv_item_desc")}</div><div style="width:74px;text-align:center">${t("inv_qty")}</div><div style="width:104px;text-align:right">${t("inv_col_price_unit")}</div><div style="width:26px"></div></div>`;
-    const itemsRows=data.items.map((it,i)=>`<div class="row" style="gap:8px;align-items:flex-end;margin-bottom:8px">
-      <div class="field" style="flex:2;margin:0"><input data-inv-idesc="${i}" value="${esc(it.desc)}" placeholder="${t("inv_item_desc")}"></div>
-      <div class="field" style="width:74px;margin:0"><input data-inv-iqty="${i}" type="number" min="0" step="1" value="${it.qty}"></div>
-      <div class="field" style="width:104px;margin:0"><input data-inv-iprice="${i}" type="number" min="0" step="0.01" value="${it.price}"></div>
-      <button class="btn danger sm" type="button" data-inv-idel="${i}" style="margin-bottom:2px" title="${t("del")}">✕</button></div>`).join("");
+    const gridCols="grid-template-columns:1fr 80px 120px 34px;gap:8px";
+    const itemsHead=`<div style="display:grid;${gridCols};margin-bottom:5px;font-size:11.5px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.3px">
+      <div>${t("inv_item_desc")}</div><div style="text-align:center">${t("inv_qty")}</div><div style="text-align:right">${t("inv_col_price_unit")}</div><div></div></div>`;
+    const itemsRows=data.items.map((it,i)=>`<div style="display:grid;${gridCols};align-items:center;margin-bottom:8px">
+      <div class="field" style="margin:0"><input data-inv-idesc="${i}" value="${esc(it.desc)}" placeholder="${t("inv_item_desc")}"></div>
+      <div class="field" style="margin:0"><input data-inv-iqty="${i}" type="number" min="0" step="1" value="${it.qty}" style="text-align:center"></div>
+      <div class="field" style="margin:0"><input data-inv-iprice="${i}" type="number" min="0" step="0.01" value="${it.price}" style="text-align:right"></div>
+      <button class="btn danger sm" type="button" data-inv-idel="${i}" title="${t("del")}">✕</button></div>`).join("");
     const lookupBox=lookupResults.length?`<div style="border:1px solid var(--border);border-radius:8px;margin:6px 0;max-height:150px;overflow:auto">
       ${lookupResults.map((r,i)=>`<div data-inv-pick="${i}" style="padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"><b>${esc(r.name)}</b>${r.regCode?` <span style="color:var(--faint)">· ${esc(r.regCode)}</span>`:""}${r.address?`<div style="color:var(--faint);font-size:12px">${esc(r.address)}</div>`:""}</div>`).join("")}</div>`:"";
     const secHead=(txt)=>`<div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--brand);margin:20px 0 10px">${txt}</div>`;
@@ -5207,24 +5241,26 @@ function invoiceModal(id){
       ${secHead(t("inv_sec_who"))}
       <div class="seg" style="display:flex;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px">
         <button type="button" data-inv-mode="group" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="group"?"var(--brand)":"transparent"};color:${data.mode==="group"?"#fff":"var(--text)"}">🗂️ ${t("inv_mode_group")}</button>
-        <button type="button" data-inv-mode="individual" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="individual"?"var(--brand)":"transparent"};color:${data.mode==="individual"?"#fff":"var(--text)"}">👤 ${t("inv_mode_ind")}</button>
-        <button type="button" data-inv-mode="private" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="private"?"var(--brand)":"transparent"};color:${data.mode==="private"?"#fff":"var(--text)"}">🧑 ${LANG==="et"?"Eraisik":"Частное лицо"}</button></div>
-      <div class="row"><div class="field" style="flex:1">${
-          data.mode==="group" ? `<label>${t("inv_group")}</label><select id="inv-group">${groupOpts}</select>`
-          : data.mode==="individual" ? `<label>${t("inv_student")}</label><select id="inv-student">${studentOpts}</select>`
-          : `<label>${t("f_isikukood")} (${LANG==="et"?"valikuline":"необязательно"})</label><input id="inv-pik" value="${esc(data.__privIk||"")}" placeholder="39001010000">`}</div>
-        <div class="field" style="flex:1"><label>${t("inv_course")}</label><select id="inv-course">${courseOpts}</select></div></div>
-      ${data.mode==="private"?`<div class="hint" style="font-size:12px;color:var(--faint);margin:-4px 0 8px">${LANG==="et"?"Nimi sisesta allpool „Ostja“ väljal.":"Имя частного лица укажите ниже в поле «Покупатель»."}</div>`:""}
-      <div class="field" style="margin-top:2px"><label>${t("inv_participants")} · ${data.participants.length}</label>${partList}
-        <label class="switch" style="margin-top:9px"><span class="toggle ${data.showParticipants!==false?"on":""}" data-inv-showpart></span>${LANG==="et"?"Näita osalejaid arvel":"Показывать участников на счёте"}</label></div>
+        <button type="button" data-inv-mode="free" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="free"?"var(--brand)":"transparent"};color:${data.mode==="free"?"#fff":"var(--text)"}">📄 ${LANG==="et"?"Vaba arve":"Свободный счёт"}</button></div>
+      ${data.mode==="group"?`
+        <div class="row"><div class="field" style="flex:1"><label>${t("inv_group")}</label><select id="inv-group">${groupOpts}</select></div>
+          <div class="field" style="flex:1"><label>${t("inv_course")}</label><select id="inv-course">${courseOpts}</select></div></div>
+        <label class="switch" style="margin:2px 0 4px"><span class="toggle ${data.showParticipants!==false?"on":""}" data-inv-showpart></span>${LANG==="et"?"Näita osalejaid arvel":"Показывать участников на счёте"}</label>
+        ${data.showParticipants!==false?`<div class="field" style="margin-top:4px"><label>${t("inv_participants")} · ${data.participants.length}</label>${partList}</div>`:""}
+      `:`<div class="hint" style="font-size:12.5px;color:var(--faint);margin:-2px 0 6px">${LANG==="et"?"Vaba arve — ilma rühma ja kursuseta, ise sisestad read.":"Свободный счёт — без группы и курса, строки вводишь сам."}</div>`}
 
       ${secHead(t("inv_sec_buyer"))}
-      <div class="field"><label>${t("inv_company")}</label>
-        <div style="display:flex;gap:8px"><input id="inv-bname" value="${esc(data.buyer.name)}" placeholder="OÜ / AS…" style="flex:1">
-          <button class="btn sm" type="button" data-inv-lookup>🔍 ${t("inv_lookup")}</button></div>
-        <div id="inv-lookup-status" style="font-size:12.5px;margin-top:5px;color:var(--muted)"></div>${lookupBox}</div>
-      <div class="row"><div class="field"><label>${t("inv_regcode")}</label><input id="inv-breg" value="${esc(data.buyer.regCode)}"></div>
-        <div class="field"><label>${t("inv_vatno")}</label><input id="inv-bvat" value="${esc(data.buyer.vatNo)}"></div></div>
+      <div class="seg" style="display:flex;gap:0;border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-bottom:10px;max-width:340px">
+        <button type="button" data-inv-payer="company" style="flex:1;padding:8px;border:0;cursor:pointer;font-weight:600;font-size:12.5px;background:${data.payerType==="company"?"var(--brand)":"transparent"};color:${data.payerType==="company"?"#fff":"var(--text)"}">🏢 ${LANG==="et"?"Ettevõte":"Компания"}</button>
+        <button type="button" data-inv-payer="private" style="flex:1;padding:8px;border:0;cursor:pointer;font-weight:600;font-size:12.5px;background:${data.payerType==="private"?"var(--brand)":"transparent"};color:${data.payerType==="private"?"#fff":"var(--text)"}">🧑 ${LANG==="et"?"Eraisik":"Частное лицо"}</button></div>
+      <div class="field"><label>${data.payerType==="private"?(LANG==="et"?"Nimi":"Имя и фамилия"):(LANG==="et"?"Ettevõte":"Компания")}</label>
+        <div style="display:flex;gap:8px"><input id="inv-bname" value="${esc(data.buyer.name)}" placeholder="${data.payerType==="private"?(LANG==="et"?"Eesnimi Perekonnanimi":"Имя Фамилия"):"OÜ / AS…"}" style="flex:1">
+          ${data.payerType==="company"?`<button class="btn sm" type="button" data-inv-lookup>🔍 ${t("inv_lookup")}</button>`:""}</div>
+        <div id="inv-lookup-status" style="font-size:12.5px;margin-top:5px;color:var(--muted)"></div>${data.payerType==="company"?lookupBox:""}</div>
+      ${data.payerType==="company"
+        ? `<div class="row"><div class="field"><label>${t("inv_regcode")}</label><input id="inv-breg" value="${esc(data.buyer.regCode)}"></div>
+             <div class="field"><label>${t("inv_vatno")}</label><input id="inv-bvat" value="${esc(data.buyer.vatNo)}"></div></div>`
+        : `<div class="field"><label>${t("f_isikukood")} (${LANG==="et"?"valikuline":"необязательно"})</label><input id="inv-breg" value="${esc(data.buyer.regCode)}" placeholder="39001010000"></div>`}
       <div class="row"><div class="field" style="flex:2"><label>${t("inv_address")}</label><input id="inv-baddr" value="${esc(data.buyer.address)}"></div>
         <div class="field" style="flex:1"><label>${t("inv_email")}</label><input id="inv-bemail" value="${esc(data.buyer.email)}" placeholder="arved@ettevote.ee"></div></div>
       <div class="row"><div class="field"><label>${t("inv_date")}</label><input id="inv-date" type="date" value="${data.date}"></div>
@@ -5251,13 +5287,11 @@ function invoiceModal(id){
   };
 
   function collect(){
-    data.buyer.name=$("#inv-bname").value.trim();
-    data.buyer.regCode=$("#inv-breg").value.trim();
-    data.buyer.vatNo=$("#inv-bvat").value.trim();
-    data.buyer.address=$("#inv-baddr").value.trim();
-    data.buyer.email=$("#inv-bemail").value.trim();
-    const pik=$("#inv-pik"); if(pik)data.__privIk=pik.value.trim();
-    if(data.mode==="private")data.participants=participantsFor();
+    const bn=$("#inv-bname"); if(bn)data.buyer.name=bn.value.trim();
+    const br=$("#inv-breg"); if(br)data.buyer.regCode=br.value.trim();
+    const bv=$("#inv-bvat"); if(bv)data.buyer.vatNo=bv.value.trim(); else data.buyer.vatNo="";
+    const ba=$("#inv-baddr"); if(ba)data.buyer.address=ba.value.trim();
+    const be=$("#inv-bemail"); if(be)data.buyer.email=be.value.trim();
     data.date=$("#inv-date").value||today();
     data.dueDate=$("#inv-due").value||data.date;
     data.note=$("#inv-note").value;
@@ -5267,9 +5301,9 @@ function invoiceModal(id){
 
   function bindInvoiceModal(){
     document.querySelectorAll("[data-inv-mode]").forEach(el=>el.onclick=()=>{collect();data.mode=el.dataset.invMode;syncParticipants();data.items=[];ensureItems();draw();});
+    document.querySelectorAll("[data-inv-payer]").forEach(el=>el.onclick=()=>{collect();data.payerType=el.dataset.invPayer;if(data.payerType==="private")data.buyer.vatNo="";draw();});
     const spt=$("[data-inv-showpart]"); if(spt)spt.onclick=()=>{collect();data.showParticipants=!(data.showParticipants!==false);draw();};
     const gsel=$("#inv-group"); if(gsel)gsel.onchange=()=>{collect();data.groupId=gsel.value;syncParticipants();data.items=[];ensureItems();draw();};
-    const ssel=$("#inv-student"); if(ssel)ssel.onchange=()=>{collect();data.__studentId=ssel.value;syncParticipants();data.items=[];ensureItems();draw();};
     const csel=$("#inv-course"); if(csel)csel.onchange=()=>{collect();data.courseId=csel.value; if(data.items.length===1&&data.courseId){const c=courseById(data.courseId);if(c)data.items[0].desc=c.title;} draw();};
     const vsel=$("#inv-vat"); if(vsel)vsel.onchange=()=>{collect();data.vatRate=+vsel.value;const rr=$("#inv-tot-rate");if(rr)rr.textContent=+data.vatRate;updateTotals();};
     document.querySelectorAll("[data-inv-pmode]").forEach(el=>el.onclick=()=>{collect();data.priceIncludesVat=(el.dataset.invPmode==="gross");draw();});
@@ -5289,7 +5323,8 @@ function invoiceModal(id){
     if(n)n.textContent=money(invNet(data)); if(v)v.textContent=money(invVat(data)); if(g)g.textContent=money(invGross(data)); }
   async function saveInvoice(){
     collect();
-    if(!data.participants.length){toast(t("inv_no_participants"));return;}
+    if(data.mode==="group"&&!data.participants.length){toast(t("inv_no_participants"));return;}
+    if(data.mode!=="group")data.participants=[];
     if(!data.buyer.name){toast(t("inv_company"));return;}
     if(!data.items.length){toast(t("inv_items"));return;}
     const body={mode:data.mode,groupId:data.groupId,courseId:data.courseId,buyer:data.buyer,participants:data.participants,items:data.items,vatRate:data.vatRate,priceIncludesVat:data.priceIncludesVat,showParticipants:data.showParticipants!==false,note:data.note,date:data.date,dueDate:data.dueDate};
@@ -5530,7 +5565,7 @@ function settingsView(){
   const s=DB.settings;
   const avail=settingsTabs();
   if(!avail.some(x=>x[0]===settingsTab))settingsTab=avail[0][0];
-  const tabbar=`<div class="tabs" style="margin-bottom:20px;flex-wrap:wrap">${avail.map(([k,ic,lbl])=>`<button class="tab ${settingsTab===k?"on":""}" data-settab="${k}">${ic} ${lbl}</button>`).join("")}</div>`;
+  const tabbar=`<div class="tabs" style="margin-bottom:20px;flex-wrap:nowrap;overflow-x:auto;white-space:nowrap">${avail.map(([k,ic,lbl])=>`<button class="tab ${settingsTab===k?"on":""}" data-settab="${k}" style="flex:0 0 auto">${ic} ${lbl}</button>`).join("")}</div>`;
   let body="";
   if(settingsTab==="general"){
     body=`<div class="module" style="padding:22px 24px">
@@ -5826,7 +5861,9 @@ function bindGlobal(){
   document.querySelectorAll("[data-rv-toggle]").forEach(el=>el.onclick=()=>{reviewFilter.ungradedOnly=!reviewFilter.ungradedOnly;render();});
   const rvg=$("#rv-group"); if(rvg)rvg.onchange=()=>{reviewFilter.group=rvg.value;render();};
   const rvs=$("#rv-search"); if(rvs)rvs.oninput=()=>{reviewFilter.q=rvs.value;$(".main").innerHTML=adminReviewView();bindGlobal();const f=$("#rv-search");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
-  document.querySelectorAll("[data-issue]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.issue.split(":");issueCert(sid,cid);});
+  document.querySelectorAll("[data-issue]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.issue.split(":");const c=courseById(cid);
+    if(c&&!isCourseComplete(sid,c)) confirmModal(LANG==="et"?"Kursus pole täielikult läbitud. Väljastada tunnistus siiski?":"Курс пройден не полностью. Всё равно выдать сертификат?",()=>issueCert(sid,cid));
+    else issueCert(sid,cid); });
   document.querySelectorAll("[data-cert-view]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certView.split(":");showCertificate(sid,cid);});
   document.querySelectorAll("[data-cert-print]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certPrint.split(":");printCert(sid,cid);});
   document.querySelectorAll("[data-cert-dl]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certDl.split(":");generateCertPDF(sid,cid);});
@@ -5888,6 +5925,7 @@ function bindGlobal(){
   // gradebook
   const gbc=$("#gb-course"); if(gbc)gbc.onchange=()=>{gbSel.course=gbc.value;render();};
   const gbg=$("#gb-group"); if(gbg)gbg.onchange=()=>{gbSel.group=gbg.value;render();};
+  const gbs=$("#gb-search"); if(gbs)gbs.oninput=()=>{gbSel.q=gbs.value;$(".main").innerHTML=gradebookView();bindGlobal();const f=$("#gb-search");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
   document.querySelectorAll("[data-export-gb]").forEach(el=>el.onclick=exportGradebook);
   document.querySelectorAll("[data-export-reg]").forEach(el=>el.onclick=exportRegistry);
   document.querySelectorAll("[data-import-csv]").forEach(el=>el.onclick=importModal);
@@ -6025,7 +6063,9 @@ document.addEventListener("keydown",(e)=>{ if(e.key==="Escape"){ const mr=$("#mo
       const me=await api("/api/me");  // если cookie-сессия валидна — 200
       applyServerSession(me);
       await hydrateReference();
-      go(DB.session.role==="student"?"my-courses":"dashboard");
+      const hv=parseHash();           // при F5 — вернуться на ту же страницу
+      if(hv&&hv.name&&!NO_HASH.includes(hv.name)) restoreView(hv);
+      else go(DB.session.role==="student"?"my-courses":"dashboard");
       return;
     }catch(e){ /* 401 → не авторизован, показываем вход */ }
   }
