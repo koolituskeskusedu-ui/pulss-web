@@ -3520,8 +3520,8 @@ function meetingRecipients(m){ return DB.students.filter(s=>s.groupId===m.groupI
 function fmtDT(m){ return `${fmtDate(m.date)}, ${m.time}`; }
 
 /* --- уведомления (демо-очередь писем, почту подключим позже) --- */
-function queueEmail(to,subject,body,type){ DB.outbox.unshift({id:uid("em"),to,subject,body,ts:nowStr(),type:type||"info"});
-  if(SERVER.mode==="server"&&to){ return api("/api/outbox",{method:"POST",body:{to,subject,body,type:type||"info"}}).catch(()=>null); }
+function queueEmail(to,subject,body,type,attachment){ DB.outbox.unshift({id:uid("em"),to,subject,body,ts:nowStr(),type:type||"info"});
+  if(SERVER.mode==="server"&&to){ const bd={to,subject,body,type:type||"info"}; if(attachment&&attachment.content&&attachment.name)bd.attachment=attachment; return api("/api/outbox",{method:"POST",body:bd}).catch(()=>null); }
   return Promise.resolve(null); }
 function notifyList(students,subject,body,type){ students.forEach(s=>queueEmail(s.email,subject,body,type)); return students.length; }
 function emailHwAdded(c,h){ return {s:`Uus kodutöö · ${c.title}`, b:`Kursusele "${c.title}" lisati kodutöö "${h.title}". Tähtaeg: ${h.deadline?fmtDate(h.deadline):"—"}.`}; }
@@ -4291,6 +4291,51 @@ function certGradesHTML(s,c){
     <div style="position:absolute;left:64px;bottom:60px;font-family:${mono};font-size:9px;color:#8A867E;letter-spacing:.06em">${esc(DB.settings.seller?.name||"EDU KOOLITUS OÜ")} · Hinneteleht on tunnistuse lahutamatu osa</div>
   </div>`;
 }
+// PDF сертификата → чистый base64 (для вложения в письмо).
+async function certPdfBase64(sid,cid){
+  const s=studentById(sid),c=courseById(cid),ct=certFor(sid,cid);
+  if(typeof html2canvas==="undefined"||!window.jspdf||!ct) return null;
+  const holder=document.createElement("div"); holder.style.cssText="position:fixed;left:-10000px;top:0;z-index:-1";
+  document.body.appendChild(holder);
+  const shot=async(html)=>{ holder.innerHTML=html; const el=holder.firstElementChild; return await html2canvas(el,{scale:2,backgroundColor:"#ffffff",logging:false}); };
+  try{
+    const pdf=new jspdf.jsPDF({orientation:"portrait",unit:"pt",format:"a4"});
+    const pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
+    const c1=await shot(certHTML(s,c,ct)); pdf.addImage(c1.toDataURL("image/jpeg",0.94),"JPEG",0,0,pw,ph);
+    if((c.cert||{}).gradesSheet){ const c2=await shot(certGradesHTML(s,c)); pdf.addPage(); pdf.addImage(c2.toDataURL("image/jpeg",0.94),"JPEG",0,0,pw,ph); }
+    const uri=pdf.output("datauristring"); const i=uri.indexOf("base64,"); return i>=0?uri.substring(i+7):null;
+  }catch(e){ return null; }
+  finally{ document.body.removeChild(holder); }
+}
+// Отправить сертификат на почту: выбор PDF или подписанного файла (файл вкладывается обязательно).
+function emailCertModal(sid,cid){
+  const s=studentById(sid),c=courseById(cid),ct=certFor(sid,cid);
+  if(!s||!c||!ct){toast("—");return;}
+  if(!s.email){toast(LANG==="et"?"Õpilasel pole e-posti":"У ученика нет e-mail");return;}
+  $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
+    <h2>${LANG==="et"?"Saada tunnistus":"Отправить сертификат"}</h2>
+    <div class="msub">${esc(fullName(s))} · ${esc(c.title)} → ${esc(s.email)}</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+      <button class="btn" data-cert-send-pdf style="justify-content:flex-start">📄 ${LANG==="et"?"Saada genereeritud PDF":"Отправить сгенерированный PDF"}</button>
+      <button class="btn" data-cert-send-signed style="justify-content:flex-start">🔏 ${LANG==="et"?"Lisa allkirjastatud fail…":"Вложить подписанный файл…"}</button>
+    </div>
+    <div id="cert-send-status" style="font-size:13px;color:var(--muted);margin-top:12px;min-height:18px"></div>
+    <div class="modal-foot"><button class="btn ghost" data-close>${t("close")}</button></div></div></div>`;
+  const stat=$("#cert-send-status");
+  const send=async(attachment)=>{
+    if(!attachment||!attachment.content){ if(stat){stat.textContent=LANG==="et"?"Faili ei õnnestunud valmistada":"Не удалось подготовить файл";stat.style.color="var(--amber)";} return; }
+    if(stat){stat.textContent=LANG==="et"?"Saadan…":"Отправляю…";stat.style.color="var(--muted)";}
+    const subj=LANG==="et"?`Tunnistus · ${c.title}`:`Сертификат · ${c.title}`;
+    const body=LANG==="et"?`Tere, ${fullName(s)}!\n\nManuses on Sinu tunnistus kursuse "${c.title}" läbimise eest (nr ${String(ct.number).padStart(3,"0")}).`:`Здравствуйте, ${fullName(s)}!\n\nВо вложении ваш сертификат за курс «${c.title}» (№ ${String(ct.number).padStart(3,"0")}).`;
+    const r=await queueEmail(s.email,subj,body,"cert",attachment);
+    logAudit(`Saatis tunnistuse → ${s.email} · ${fullName(s)}`);
+    $("#modal-root").innerHTML="";
+    toast(SERVER.mode==="server"?(r&&r.sent?`📧 ${LANG==="et"?"Saadetud":"Отправлено"}`:(LANG==="et"?"⚠ Saatmine ebaõnnestus":"⚠ Не удалось отправить")):"📧");
+  };
+  $("[data-cert-send-pdf]").onclick=async()=>{ if(stat){stat.textContent=LANG==="et"?"Valmistan PDF-i…":"Готовлю PDF…";} const b64=await certPdfBase64(sid,cid); send(b64?{name:`${fullName(s)} — tunnistus.pdf`,content:b64}:null); };
+  $("[data-cert-send-signed]").onclick=()=>{ const inp=document.createElement("input"); inp.type="file"; inp.accept=".pdf,.asice,.bdoc,.ddoc,.edoc,application/pdf"; inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; if(stat){stat.textContent=LANG==="et"?"Laen faili…":"Загружаю файл…";} const rd=new FileReader(); rd.onload=()=>{ const uri=String(rd.result); const i=uri.indexOf("base64,"); const content=i>=0?uri.substring(i+7):null; send(content?{name:f.name,content}:null); }; rd.readAsDataURL(f); }; inp.click(); };
+  document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
+}
 async function generateCertPDF(sid,cid){
   const s=studentById(sid),c=courseById(cid),ct=certFor(sid,cid);
   if(typeof html2canvas==="undefined"||!window.jspdf){toast("PDF: библиотека не загрузилась");return;}
@@ -4933,6 +4978,7 @@ function adminCertsView(){
           <button class="btn sm" data-cert-view="${key}" title="${t("view")}">👁</button>
           <button class="btn sm" data-cert-print="${key}" title="${t("cert_print")}">🖨</button>
           <button class="btn sm" data-cert-dl="${key}" title="${t("cert_dl")}">⬇</button>
+          <button class="btn sm" data-cert-email="${key}" title="${LANG==="et"?"Saada e-postiga":"Отправить на почту"}">✉</button>
           <button class="btn danger sm" data-cert-del="${key}" title="${t("cert_delete")}">✕</button>`
         :done?`<button class="btn primary sm" data-issue="${key}">🖋️ ${t("issue_cert")}</button>`:`<span class="badge gray">${t("not_ready")}</span>`}</td></tr>`;}).join("")}
   </tbody></table>`:emptyState("🏆",t("no_students"))}`;
@@ -4944,6 +4990,7 @@ function adminCertsView(){
       <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-cert-view="${key}" title="${t("view")}">👁</button>
         <button class="btn sm" data-cert-print="${key}" title="${t("cert_print")}">🖨</button>
         <button class="btn sm" data-cert-dl="${key}" title="${t("cert_dl")}">⬇</button>
+        <button class="btn sm" data-cert-email="${key}" title="${LANG==="et"?"Saada e-postiga":"Отправить на почту"}">✉</button>
         <button class="btn danger sm" data-cert-del="${key}" title="${t("cert_delete")}">✕</button></td></tr>`;}).join("")}
   </tbody></table>`:emptyState("🏆",t("no_reg"))}`;
   return `${topbar(t("t_certsA"),t("t_certsA_s"))}<div class="content" style="max-width:1040px">
@@ -5354,6 +5401,23 @@ function invoiceHTML(iv){
   </div>`;
 }
 
+// Сгенерировать PDF счёта и вернуть чистый base64 (для вложения в письмо).
+async function invoicePdfBase64(iv){
+  if(typeof html2canvas==="undefined"||!window.jspdf) return null;
+  const holder=document.createElement("div"); holder.style.cssText="position:fixed;left:-10000px;top:0;z-index:-1";
+  document.body.appendChild(holder);
+  try{
+    holder.innerHTML=invoiceHTML(iv); const el=holder.firstElementChild;
+    const canvas=await html2canvas(el,{scale:2,backgroundColor:"#ffffff",logging:false});
+    const pdf=new jspdf.jsPDF({orientation:"portrait",unit:"pt",format:"a4"});
+    const pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
+    const imgH=canvas.height*(pw/canvas.width);
+    pdf.addImage(canvas.toDataURL("image/jpeg",0.94),"JPEG",0,0,pw,Math.min(imgH,ph));
+    const uri=pdf.output("datauristring"); const i=uri.indexOf("base64,");
+    return i>=0?uri.substring(i+7):null;
+  }catch(e){ return null; }
+  finally{ document.body.removeChild(holder); }
+}
 async function generateInvoicePDF(id){
   const iv=DB.invoices.find(x=>x.id===id); if(!iv)return;
   if(typeof html2canvas==="undefined"||!window.jspdf){toast("PDF: библиотека не загрузилась");return;}
@@ -5378,7 +5442,10 @@ async function emailInvoice(id){
   if(!iv.buyer?.email){ toast(t("inv_no_buyer_email")); invoiceModal(id); return; }
   const vars={ number:iv.numberStr, seller:DB.settings.seller?.name||brandName(), gross:money(invGross(iv)).replace(" €"," €"), due:fmtDateNum(iv.dueDate) };
   const em=buildEmail("invoice",vars,()=>({s:`Arve ${iv.numberStr}`,b:`Lisatud arve ${iv.numberStr} summas ${money(invGross(iv))}. Maksetähtaeg: ${fmtDateNum(iv.dueDate)}.`}));
-  const r=await queueEmail(iv.buyer.email,em.s,em.b,"invoice");
+  toast(LANG==="et"?"Valmistan PDF-i…":"Готовлю PDF…");
+  const b64=await invoicePdfBase64(iv);
+  const attachment=b64?{name:`${iv.kind==="credit"?"Kreeditarve":"Arve"} ${iv.numberStr}.pdf`,content:b64}:null;
+  const r=await queueEmail(iv.buyer.email,em.s,em.b,"invoice",attachment);
   logAudit(`Saatis arve ${iv.numberStr} → ${iv.buyer.email}`);
   if(SERVER.mode==="server") toast(r&&r.sent?`📧 ${t("inv_emailed")}`:(LANG==="et"?"⚠ Saatmine ebaõnnestus":"⚠ Не удалось отправить"));
   else toast(t("inv_emailed"));
@@ -5762,6 +5829,7 @@ function bindGlobal(){
   document.querySelectorAll("[data-cert-print]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certPrint.split(":");printCert(sid,cid);});
   document.querySelectorAll("[data-cert-dl]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certDl.split(":");generateCertPDF(sid,cid);});
   document.querySelectorAll("[data-cert-del]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certDel.split(":");revokeCert(sid,cid);});
+  document.querySelectorAll("[data-cert-email]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certEmail.split(":");emailCertModal(sid,cid);});
   document.querySelectorAll("[data-cert-sel]").forEach(el=>el.onchange=()=>{el.checked?certSel.add(el.dataset.certSel):certSel.delete(el.dataset.certSel);$(".main").innerHTML=adminCertsView();bindGlobal();});
   document.querySelectorAll("[data-cert-selall]").forEach(el=>el.onchange=()=>{const scope=scopedStudentIds();let ready=[];scopedStudents().forEach(s=>s.courses.forEach(cid=>{const c=courseById(cid);if(c&&isCourseComplete(s.id,c)&&!certFor(s.id,c.id)){if(!certFilter.group||s.groupId===certFilter.group)ready.push(`${s.id}:${c.id}`);}}));if(el.checked)ready.forEach(k=>certSel.add(k));else certSel.clear();render();});
   document.querySelectorAll("[data-cert-bulk-issue]").forEach(el=>el.onclick=()=>bulkIssueCerts([...certSel]));
