@@ -3600,7 +3600,9 @@ function validateIsikukood(code){
 }
 
 /* --- журнал действий --- */
-function logAudit(action){ const who=isStaff()?(currentStaff()?.name||t("admin")):"—"; DB.audit.unshift({id:uid("a"),ts:nowStr(),who,action}); }
+function logAudit(action){ const who=isStaff()?(currentStaff()?.name||t("admin")):"—"; DB.audit.unshift({id:uid("a"),ts:nowStr(),who,action});
+  if(SERVER.mode==="server"){ api("/api/audit",{method:"POST",body:{who,action}}).catch(()=>{}); } }
+async function hydrateAudit(){ try{ const a=await api("/api/audit"); if(Array.isArray(a)) DB.audit=a.map(x=>({id:x.id,ts:x.ts,who:x.who,action:x.action})); }catch(e){} }
 
 /* --- шаблоны писем --- */
 function renderTemplate(str,vars){ return String(str||"").replace(/\{(\w+)\}/g,(m,k)=>vars[k]!=null?vars[k]:m); }
@@ -3718,7 +3720,7 @@ async function hydrateMeetings(){ try{ const m=await api("/api/meetings"); if(Ar
 async function hydrateMessages(){ try{ const m=await api("/api/messages"); if(Array.isArray(m)) DB.messages=m.map(mapMessage); }catch(e){} }
 function mapCert(x){ return {id:x.id,number:x.number,studentId:x.student_id,courseId:x.course_id,date:x.date,validUntil:x.valid_until||null,pdfKey:x.pdf_key||null}; }
 async function hydrateCerts(){ try{ const cs=await api("/api/certificates"); if(Array.isArray(cs)) DB.certificates=cs.map(mapCert); }catch(e){} }
-function mapInvoice(x){ return {id:x.id,number:x.number,numberStr:x.number_str,viitenumber:x.viitenumber||"",kind:x.kind||"invoice",creditOf:x.credit_of||null,creditedBy:x.credited_by||null,mode:x.mode||"group",groupId:x.group_id||"",courseId:x.course_id||"",buyer:{name:x.buyer_name||"",regCode:x.buyer_regcode||"",vatNo:x.buyer_vatno||"",address:x.buyer_address||"",email:x.buyer_email||""},participants:x.participants||[],items:(x.items||[]).map(it=>({desc:it.desc,qty:it.qty,price:it.price})),vatRate:x.vat_rate,priceIncludesVat:!!x.priceIncludesVat,note:x.note||"",date:x.date,dueDate:x.due_date||"",paid:!!x.paid,paidDate:x.paid_date||null,createdAt:x.created_at||""}; }
+function mapInvoice(x){ return {id:x.id,number:x.number,numberStr:x.number_str,viitenumber:x.viitenumber||"",kind:x.kind||"invoice",creditOf:x.credit_of||null,creditedBy:x.credited_by||null,mode:x.mode||"group",groupId:x.group_id||"",courseId:x.course_id||"",buyer:{name:x.buyer_name||"",regCode:x.buyer_regcode||"",vatNo:x.buyer_vatno||"",address:x.buyer_address||"",email:x.buyer_email||""},participants:x.participants||[],items:(x.items||[]).map(it=>({desc:it.desc,qty:it.qty,price:it.price})),vatRate:x.vat_rate,priceIncludesVat:!!x.priceIncludesVat,showParticipants:x.showParticipants!==false,note:x.note||"",date:x.date,dueDate:x.due_date||"",paid:!!x.paid,paidDate:x.paid_date||null,createdAt:x.created_at||""}; }
 async function hydrateInvoices(){ try{ const iv=await api("/api/invoices"); if(Array.isArray(iv)) DB.invoices=iv.map(mapInvoice); }catch(e){} }
 async function hydrateReference(){
   try{ const st=await api("/api/settings"); mapSettings(st); }catch(e){}
@@ -3729,7 +3731,7 @@ async function hydrateReference(){
   await hydrateMeetings();
   await hydrateMessages();
   await hydrateCerts();
-  if(DB.session&&DB.session.role!=="student"){ await hydrateInvoices(); }
+  if(DB.session&&DB.session.role!=="student"){ await hydrateInvoices(); await hydrateAudit(); }
   if(DB.session&&DB.session.role==="admin") await hydrateStaff();
   if(DB.session&&DB.session.role!=="student") await hydrateRequests();
 }
@@ -3799,9 +3801,8 @@ function render(){
 
 /* ---------- AUTH ---------- */
 function authSide(){ return `<div class="auth-side"><div class="mark">pulss<i>.</i></div>
-  <div><h2>${t("a_welcome")}</h2><p>${t("a_sub")}</p>
-    <div class="auth-feat"><div>✅ ${t("a_f1")}</div><div>✅ ${t("a_f2")}</div><div>✅ ${t("a_f3")}</div></div></div>
-  <div style="opacity:.7;font-size:13px">© 2026 ${esc(brandName())}</div></div>`; }
+  <div><h2 style="font-size:32px;line-height:1.12;margin:0">Esmaabi koolitused</h2></div>
+  <div style="opacity:.72;font-size:13px;line-height:1.7">© 2026 pulss.<br>Edu Koolitus OÜ</div></div>`; }
 function langToggle(){ return `<div class="lang"><button data-lang="et" class="${LANG==="et"?"on":""}">EST</button><button data-lang="ru" class="${LANG==="ru"?"on":""}">РУС</button></div>`; }
 
 function authView(){
@@ -3809,18 +3810,11 @@ function authView(){
   if(view.name==="verify") return verifyView();
   return `<div class="auth-wrap">${authSide()}<div class="auth-main"><div class="auth-top">${langToggle()}</div>
     <div class="auth-box"><h1>${t("login_t")}</h1><div class="lead">${t("login_lead")}</div>
-      <div style="display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:6px;margin-bottom:16px;background:${SERVER.online?"var(--green-soft)":"var(--surface-2)"};color:${SERVER.online?"var(--brand-2)":"var(--muted)"};border:1px solid ${SERVER.online?"#BEDCCB":"var(--border-2)"}">
-        <span style="width:7px;height:7px;border-radius:50%;background:${SERVER.online?"var(--green)":"var(--faint)"}"></span>${SERVER.online?(LANG==="et"?"Server ühendatud":"Сервер подключён"):(LANG==="et"?"Demo-režiim (server pole ühendatud)":"Демо-режим (сервер не подключён)")}</div>
       <div class="field"><label>${t("f_login")}</label><input id="li-name" placeholder="Андрей Смагин"></div>
       <div class="field"><label>${t("f_pass")}</label><input id="li-pass" type="password" placeholder="••••••••"></div>
       <button class="btn primary" id="li-btn" style="width:100%;justify-content:center;margin-top:4px">${t("login_btn")}</button>
       <div style="margin-top:14px;font-size:13.5px;color:var(--muted)">${t("no_acc")} <span class="link" data-goreg>${t("reg_link")} →</span></div>
       <div style="margin-top:8px;font-size:13.5px"><span class="link" data-goverify>🔎 ${t("verify_link")}</span></div>
-      <div class="divider">${t("demo")}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn" style="flex:1;min-width:100px;justify-content:center" data-demo="admin">${t("demo_admin")}</button>
-        <button class="btn" style="flex:1;min-width:100px;justify-content:center" data-demo="teacher">${t("demo_teacher")}</button>
-        <button class="btn" style="flex:1;min-width:100px;justify-content:center" data-demo="student">${t("demo_student")}</button></div>
     </div></div></div>`;
 }
 function registerView(){
@@ -4813,25 +4807,31 @@ function approveModal(rid){
 }
 
 /* ---------- ADMIN: review ---------- */
-let reviewFilter={ungradedOnly:true,course:""};
+let certEditorOpen=false;
+let chatSearch="";
+let reviewFilter={ungradedOnly:true,course:"",group:"",q:""};
 function adminReviewView(){
   const scope=scopedStudentIds();
   let subs=DB.submissions.filter(s=>scope.has(s.studentId));
   if(reviewFilter.course) subs=subs.filter(s=>s.courseId===reviewFilter.course);
+  if(reviewFilter.group) subs=subs.filter(s=>studentById(s.studentId)?.groupId===reviewFilter.group);
+  if(reviewFilter.q){const q=reviewFilter.q.toLowerCase().trim();subs=subs.filter(s=>{const st=studentById(s.studentId);const c=courseById(s.courseId);const h=(c?.homework||[]).find(h=>h.id===s.hwId);return (st&&fullName(st).toLowerCase().includes(q))||((h?.title||"").toLowerCase().includes(q));});}
   if(reviewFilter.ungradedOnly) subs=subs.filter(s=>s.grade===null);
   subs.sort((a,b)=>(a.grade===null?0:1)-(b.grade===null?0:1));
   const courseTabs=[{id:"",title:t("all_courses")},...DB.courses.filter(c=>(c.homework||[]).length).map(c=>({id:c.id,title:c.title}))];
   return `${topbar(t("t_review"),t("t_review_s"))}<div class="content" style="max-width:1060px">
     <div class="tabs">${courseTabs.map(ct=>{const cnt=DB.submissions.filter(s=>scope.has(s.studentId)&&s.grade===null&&(ct.id?s.courseId===ct.id:true)).length;
       return `<button class="tab ${reviewFilter.course===ct.id?"on":""}" data-rvtab="${ct.id}">${esc(ct.title)}${cnt?`<span class="pip">${cnt}</span>`:""}</button>`;}).join("")}</div>
-    <div class="toolbar"><label class="switch"><span class="toggle ${reviewFilter.ungradedOnly?"on":""}" data-rv-toggle></span>${t("filter_ungraded")}</label></div>
+    <div class="toolbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><label class="switch"><span class="toggle ${reviewFilter.ungradedOnly?"on":""}" data-rv-toggle></span>${t("filter_ungraded")}</label>
+      <select id="rv-group" style="max-width:220px"><option value="">${t("scope_all")}</option>${scopedGroups().map(g=>`<option value="${g.id}" ${reviewFilter.group===g.id?"selected":""}>${esc(g.name)}</option>`).join("")}</select>
+      <input id="rv-search" placeholder="${LANG==="et"?"Otsi õpilast või tööd":"Поиск ученика или работы"}" value="${esc(reviewFilter.q)}" style="flex:1;min-width:170px"></div>
     ${subs.length?`<table class="table"><thead><tr><th>${t("col_student")}</th><th>${t("col_task")}</th><th>${t("col_file")}</th><th>${t("col_date")}</th><th>${t("col_grade")}</th><th></th></tr></thead><tbody>
       ${subs.map(x=>{const s=studentById(x.studentId);const c=courseById(x.courseId);const h=(c?.homework||[]).find(h=>h.id===x.hwId);const overdue=h?.deadline&&x.date>h.deadline;
         return `<tr><td><b>${esc(fullName(s))}</b><div style="font-size:12px;color:var(--faint)">${esc(groupById(s.groupId)?.name||"")}</div></td>
         <td>${esc(h?.title||"")}${overdue?` <span class="badge late">${t("hw_overdue")}</span>`:""}<div style="font-size:12px;color:var(--faint)">${esc(c?.title||"")}</div></td>
         <td>${x.fileUrl?`<a class="link" href="${x.fileUrl}" target="_blank" rel="noopener">📎 ${esc(x.fileName)}</a>`:`<span style="color:var(--muted)">📎 ${esc(x.fileName)}</span>`}</td><td style="color:var(--muted)">${fmtDate(x.date)}</td>
         <td>${x.grade!==null?`<b style="font-size:15px">${isNumGrade(x.grade)?x.grade+`</b><span style="color:var(--faint)"> /100</span>`:esc(x.grade)+"</b>"}${x.gradedBy?`<div style="font-size:11.5px;color:var(--faint)">${t("graded_by")}: ${esc(x.gradedBy)}</div>`:""}`:`<span class="badge pending">—</span>`}</td>
-        <td style="text-align:right"><button class="btn sm ${x.grade===null?"primary":""}" data-grade="${x.id}">${x.grade===null?t("give_grade"):t("edit")}</button></td></tr>`;}).join("")}
+        <td style="text-align:right;white-space:nowrap"><button class="btn sm ${x.grade===null?"primary":""}" data-grade="${x.id}">${x.grade===null?t("give_grade"):t("edit")}</button> <button class="btn danger sm" data-del-sub="${x.id}" title="${LANG==="et"?"Kustuta töö":"Удалить работу"}">✕</button></td></tr>`;}).join("")}
     </tbody></table>`:emptyState("📝",t("no_subs"))}</div>`;
 }
 function gradeModal(subId){
@@ -4865,13 +4865,18 @@ function adminMessagesView(){
   if(sel) DB.messages.filter(m=>m.studentId===sel&&m.from==="student").forEach(m=>m.read=true);
   const msgs=sel?threadMsgs(sel):[];
   const selS=sel?studentById(sel):null;
+  const q=chatSearch.toLowerCase().trim();
+  const fids=q?ids.filter(id=>{const s=studentById(id);return s&&fullName(s).toLowerCase().includes(q);}):ids;
+  const groupBtn=`<button class="btn sm" data-chat-group style="width:100%;justify-content:center;margin-bottom:8px">✉ ${LANG==="et"?"Kirjuta rühmale":"Написать группе"}</button>`;
   return `${topbar(t("t_messages"),t("t_messages_s"))}<div class="content">
+    <div style="margin-bottom:12px">${groupBtn}</div>
     ${ids.length?`<div class="chat-layout"><div class="thread-list">
-      ${ids.map(id=>{const s=studentById(id);const lm=lastMsg(id);const un=lm?.from==="student";
+      <div style="padding:8px 8px 6px"><input id="chat-search" placeholder="${LANG==="et"?"Otsi õpilast…":"Поиск ученика…"}" value="${esc(chatSearch)}" style="width:100%;box-sizing:border-box;font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:8px"></div>
+      ${fids.map(id=>{const s=studentById(id);const lm=lastMsg(id);const un=lm?.from==="student";
         return `<div class="thread ${sel===id?"on":""}" data-thread="${id}"><div class="avatar" style="width:34px;height:34px;font-size:12px">${(s.firstName[0]+s.lastName[0]).toUpperCase()}</div>
         <div class="tinfo"><div class="tn">${esc(fullName(s))}</div><div class="tsnip">${esc(lm?.text||"")}</div></div>${un?`<div class="tdot"></div>`:""}</div>`;}).join("")}
     </div><div class="chat-main">
-      ${selS?`<div class="chat-head">${esc(fullName(selS))} · <span style="color:var(--muted);font-weight:400">${esc(groupById(selS.groupId)?.name||"")}</span></div>
+      ${selS?`<div class="chat-head" style="display:flex;align-items:center;gap:8px">${esc(fullName(selS))} · <span style="color:var(--muted);font-weight:400">${esc(groupById(selS.groupId)?.name||"")}</span><button class="btn danger sm" data-chat-del="${sel}" style="margin-left:auto">🗑 ${LANG==="et"?"Kustuta vestlus":"Удалить чат"}</button></div>
       <div class="chat-msgs" id="chat-scroll">${msgs.map(m=>`<div class="bubble ${m.from==="admin"?"me":"them"}">${esc(m.text)}<div class="tm">${m.from==="admin"?t("you"):esc(selS.firstName)} · ${fmtWhen(m.ts)}</div></div>`).join("")}</div>
       <div class="chat-input"><input id="adm-chat-in" placeholder="${t("chat_ph")}"><button class="btn primary" data-adm-send="${sel}">${t("send")}</button></div>`
       :`<div style="margin:auto;color:var(--muted)">${t("pick_thread")}</div>`}
@@ -4882,6 +4887,22 @@ function sendAdminMsg(sid){
   DB.messages.push({id:uid("msg"),studentId:sid,from:"admin",text:txt,ts:nowStr(),read:false});
   if(SERVER.mode==="server"){ api("/api/messages",{method:"POST",body:{student_id:sid,text:txt}}).catch(()=>{}); }
   view.thread=sid; render(); const sc=$("#chat-scroll");if(sc)sc.scrollTop=sc.scrollHeight;
+}
+function groupMessageModal(){
+  const gopts=scopedGroups().map(g=>`<option value="${g.id}">${esc(g.name)} (${DB.students.filter(s=>s.groupId===g.id).length})</option>`).join("");
+  $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" onclick="event.stopPropagation()">
+    <h2>${LANG==="et"?"Sõnum rühmale":"Сообщение группе"}</h2><div class="msub">${LANG==="et"?"Sõnum läheb kõigile rühma õpilastele":"Сообщение получат все ученики группы"}</div>
+    <div class="field"><label>${t("meet_group")}</label><select id="gm-group"><option value="">${t("pick_group")}</option>${gopts}</select></div>
+    <div class="field"><label>${LANG==="et"?"Sõnum":"Сообщение"}</label><textarea id="gm-text" style="min-height:90px"></textarea></div>
+    <div class="modal-foot"><button class="btn ghost" data-close>${t("close")}</button><button class="btn primary" data-gm-send>${t("send")}</button></div></div></div>`;
+  $("[data-gm-send]").onclick=async()=>{const gid=$("#gm-group").value;const txt=$("#gm-text").value.trim();
+    if(!gid||!txt){toast(LANG==="et"?"Vali rühm ja sisesta tekst":"Выберите группу и введите текст");return;}
+    const recips=DB.students.filter(s=>s.groupId===gid);let n=0;
+    for(const s of recips){ DB.messages.push({id:uid("msg"),studentId:s.id,from:"admin",text:txt,ts:nowStr(),read:false});
+      if(SERVER.mode==="server"){ try{ await api("/api/messages",{method:"POST",body:{student_id:s.id,text:txt}}); }catch(e){} } n++; }
+    logAudit(`Saatis rühmasõnumi — ${groupById(gid)?.name||""} (${n})`);
+    $("#modal-root").innerHTML="";render();toast(`✉ ${n} ${LANG==="et"?"saadetud":"отправлено"}`);};
+  document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
 }
 
 /* ---------- ADMIN: certificates ---------- */
@@ -5004,8 +5025,8 @@ function invoicesView(){
       : (od>0 ? `<span class="badge late">⏰ ${t("inv_unpaid")}</span><div style="font-size:11px;color:var(--red)">+${od} ${LANG==="et"?"p":"дн"}</div>` : `<span class="badge amber">● ${t("inv_unpaid")}</span>`);
     return `<tr${isCredit?` style="background:var(--surface-2)"`:""}>
       <td><b>${esc(iv.numberStr)}</b>${isCredit?` <span style="font-size:11px;color:var(--faint)">↩${esc(DB.invoices.find(x=>x.id===iv.creditOf)?.numberStr||"")}</span>`:""}<div style="font-size:12px;color:var(--faint)">${fmtDate(iv.date)}</div><div style="font-size:11px;color:var(--faint)" title="${t("inv_refno")}">${t("inv_refno")}: ${esc(iv.viitenumber||"—")}</div></td>
-      <td><b style="font-weight:600">${esc(iv.buyer?.name||"—")}</b><div style="font-size:12px;color:var(--faint)">${subject} · ${(iv.participants||[]).length} ${t("members")}</div>
-        <div style="font-size:11.5px;color:var(--faint);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${names}">${names}</div></td>
+      <td><b style="font-weight:600">${esc(iv.buyer?.name||"—")}</b><div style="font-size:12px;color:var(--faint)">${subject}</div>
+        ${iv.dueDate&&!isCredit?`<div style="font-size:11.5px;color:var(--faint)">${LANG==="et"?"Maksetähtaeg":"Срок оплаты"}: ${fmtDate(iv.dueDate)}</div>`:""}</td>
       <td style="white-space:nowrap"><b style="${isCredit?"color:var(--red)":""}">${money(invGross(iv))}</b><div style="font-size:11.5px;color:var(--faint)">${t("inv_vat")}: ${money(invVat(iv))}</div></td>
       <td>${statusCell}</td>
       <td style="text-align:right;white-space:nowrap">
@@ -5070,6 +5091,10 @@ function invoiceReport(){
 
 // Estonian e-Business Register lookup by company name (public autocomplete endpoint).
 async function fetchAriregister(name){
+  // На сервере — через прокси (обходит CORS и надёжнее). В демо — напрямую.
+  if(SERVER.mode==="server"){
+    try{ const r=await api("/api/company-search?q="+encodeURIComponent(name)); return (r&&r.results)||[]; }catch(e){ return []; }
+  }
   const url="https://ariregister.rik.ee/est/api/autocomplete?q="+encodeURIComponent(name)+"&results_limit=8";
   const res=await fetch(url,{headers:{"Accept":"application/json"}});
   if(!res.ok) throw new Error("HTTP "+res.status);
@@ -5091,7 +5116,7 @@ function invoiceModal(id){
     id:uid("inv"), mode:"group", groupId:scopedGroups()[0]?.id||DB.groups[0]?.id||"", courseId:"",
     buyer:{name:"",regCode:"",vatNo:"",address:"",email:""},
     participants:[], items:[], vatRate:(DB.settings.invoiceVatRate??24), priceIncludesVat:!!DB.settings.invoicePriceIncludesVat,
-    note:"", paid:false, paidDate:null,
+    showParticipants:true, note:"", paid:false, paidDate:null,
     date:today(), dueDate:addDays(today(),DB.settings.invoiceDueDays||14),
   };
   if(data.priceIncludesVat===undefined)data.priceIncludesVat=false;
@@ -5099,6 +5124,7 @@ function invoiceModal(id){
   let lookupResults=[];
   const participantsFor=()=>{
     if(data.mode==="group"){ return DB.students.filter(s=>s.groupId===data.groupId).map(s=>({studentId:s.id,name:fullName(s),isikukood:s.isikukood})); }
+    if(data.mode==="private"){ return data.buyer.name?[{studentId:null,name:data.buyer.name,isikukood:data.__privIk||""}]:[]; }
     const s=studentById(data.__studentId); return s?[{studentId:s.id,name:fullName(s),isikukood:s.isikukood}]:[];
   };
   const syncParticipants=()=>{ data.participants=participantsFor(); };
@@ -5126,18 +5152,22 @@ function invoiceModal(id){
     const lookupBox=lookupResults.length?`<div style="border:1px solid var(--border);border-radius:8px;margin:6px 0;max-height:150px;overflow:auto">
       ${lookupResults.map((r,i)=>`<div data-inv-pick="${i}" style="padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"><b>${esc(r.name)}</b>${r.regCode?` <span style="color:var(--faint)">· ${esc(r.regCode)}</span>`:""}${r.address?`<div style="color:var(--faint);font-size:12px">${esc(r.address)}</div>`:""}</div>`).join("")}</div>`:"";
     const secHead=(txt)=>`<div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--brand);margin:20px 0 10px">${txt}</div>`;
-    $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" style="max-width:660px" onclick="event.stopPropagation()">
+    $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" style="max-width:820px" onclick="event.stopPropagation()">
       <h2>${existing?t("inv_edit"):t("new_invoice")}</h2><div class="msub">${existing?esc(existing.numberStr):invNumberStr((DB.settings.invoiceSeq||0)+1)}</div>
 
       ${secHead(t("inv_sec_who"))}
       <div class="seg" style="display:flex;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px">
         <button type="button" data-inv-mode="group" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="group"?"var(--brand)":"transparent"};color:${data.mode==="group"?"#fff":"var(--text)"}">🗂️ ${t("inv_mode_group")}</button>
-        <button type="button" data-inv-mode="individual" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="individual"?"var(--brand)":"transparent"};color:${data.mode==="individual"?"#fff":"var(--text)"}">👤 ${t("inv_mode_ind")}</button></div>
-      <div class="row"><div class="field" style="flex:1">${data.mode==="group"
-          ?`<label>${t("inv_group")}</label><select id="inv-group">${groupOpts}</select>`
-          :`<label>${t("inv_student")}</label><select id="inv-student">${studentOpts}</select>`}</div>
+        <button type="button" data-inv-mode="individual" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="individual"?"var(--brand)":"transparent"};color:${data.mode==="individual"?"#fff":"var(--text)"}">👤 ${t("inv_mode_ind")}</button>
+        <button type="button" data-inv-mode="private" style="flex:1;padding:10px;border:0;cursor:pointer;font-weight:600;font-size:13.5px;background:${data.mode==="private"?"var(--brand)":"transparent"};color:${data.mode==="private"?"#fff":"var(--text)"}">🧑 ${LANG==="et"?"Eraisik":"Частное лицо"}</button></div>
+      <div class="row"><div class="field" style="flex:1">${
+          data.mode==="group" ? `<label>${t("inv_group")}</label><select id="inv-group">${groupOpts}</select>`
+          : data.mode==="individual" ? `<label>${t("inv_student")}</label><select id="inv-student">${studentOpts}</select>`
+          : `<label>${t("f_isikukood")} (${LANG==="et"?"valikuline":"необязательно"})</label><input id="inv-pik" value="${esc(data.__privIk||"")}" placeholder="39001010000">`}</div>
         <div class="field" style="flex:1"><label>${t("inv_course")}</label><select id="inv-course">${courseOpts}</select></div></div>
-      <div class="field" style="margin-top:2px"><label>${t("inv_participants")} · ${data.participants.length}</label>${partList}</div>
+      ${data.mode==="private"?`<div class="hint" style="font-size:12px;color:var(--faint);margin:-4px 0 8px">${LANG==="et"?"Nimi sisesta allpool „Ostja“ väljal.":"Имя частного лица укажите ниже в поле «Покупатель»."}</div>`:""}
+      <div class="field" style="margin-top:2px"><label>${t("inv_participants")} · ${data.participants.length}</label>${partList}
+        <label class="switch" style="margin-top:9px"><span class="toggle ${data.showParticipants!==false?"on":""}" data-inv-showpart></span>${LANG==="et"?"Näita osalejaid arvel":"Показывать участников на счёте"}</label></div>
 
       ${secHead(t("inv_sec_buyer"))}
       <div class="field"><label>${t("inv_company")}</label>
@@ -5177,6 +5207,8 @@ function invoiceModal(id){
     data.buyer.vatNo=$("#inv-bvat").value.trim();
     data.buyer.address=$("#inv-baddr").value.trim();
     data.buyer.email=$("#inv-bemail").value.trim();
+    const pik=$("#inv-pik"); if(pik)data.__privIk=pik.value.trim();
+    if(data.mode==="private")data.participants=participantsFor();
     data.date=$("#inv-date").value||today();
     data.dueDate=$("#inv-due").value||data.date;
     data.note=$("#inv-note").value;
@@ -5186,6 +5218,7 @@ function invoiceModal(id){
 
   function bindInvoiceModal(){
     document.querySelectorAll("[data-inv-mode]").forEach(el=>el.onclick=()=>{collect();data.mode=el.dataset.invMode;syncParticipants();data.items=[];ensureItems();draw();});
+    const spt=$("[data-inv-showpart]"); if(spt)spt.onclick=()=>{collect();data.showParticipants=!(data.showParticipants!==false);draw();};
     const gsel=$("#inv-group"); if(gsel)gsel.onchange=()=>{collect();data.groupId=gsel.value;syncParticipants();data.items=[];ensureItems();draw();};
     const ssel=$("#inv-student"); if(ssel)ssel.onchange=()=>{collect();data.__studentId=ssel.value;syncParticipants();data.items=[];ensureItems();draw();};
     const csel=$("#inv-course"); if(csel)csel.onchange=()=>{collect();data.courseId=csel.value; if(data.items.length===1&&data.courseId){const c=courseById(data.courseId);if(c)data.items[0].desc=c.title;} draw();};
@@ -5210,7 +5243,7 @@ function invoiceModal(id){
     if(!data.participants.length){toast(t("inv_no_participants"));return;}
     if(!data.buyer.name){toast(t("inv_company"));return;}
     if(!data.items.length){toast(t("inv_items"));return;}
-    const body={mode:data.mode,groupId:data.groupId,courseId:data.courseId,buyer:data.buyer,participants:data.participants,items:data.items,vatRate:data.vatRate,priceIncludesVat:data.priceIncludesVat,note:data.note,date:data.date,dueDate:data.dueDate};
+    const body={mode:data.mode,groupId:data.groupId,courseId:data.courseId,buyer:data.buyer,participants:data.participants,items:data.items,vatRate:data.vatRate,priceIncludesVat:data.priceIncludesVat,showParticipants:data.showParticipants!==false,note:data.note,date:data.date,dueDate:data.dueDate};
     if(SERVER.mode==="server"){
       try{ if(existing){ if(existing.creditedBy){toast(t("inv_locked_credited"));return;} await api(`/api/invoices/${existing.id}`,{method:"PUT",body}); logAudit(`Muutis arvet ${existing.numberStr}`); }
         else{ const res=await api("/api/invoices",{method:"POST",body}); logAudit(`Koostas arve ${res&&res.numberStr||""} · ${data.buyer.name}`); }
@@ -5218,7 +5251,7 @@ function invoiceModal(id){
       toast(t("inv_saved")); $("#modal-root").innerHTML=""; render(); return;
     }
     if(existing){ if(existing.creditedBy){toast(t("inv_locked_credited"));return;}
-      Object.assign(existing,{mode:data.mode,groupId:data.groupId,courseId:data.courseId,buyer:data.buyer,participants:data.participants,items:data.items,vatRate:data.vatRate,priceIncludesVat:data.priceIncludesVat,note:data.note,date:data.date,dueDate:data.dueDate});
+      Object.assign(existing,{mode:data.mode,groupId:data.groupId,courseId:data.courseId,buyer:data.buyer,participants:data.participants,items:data.items,vatRate:data.vatRate,priceIncludesVat:data.priceIncludesVat,showParticipants:data.showParticipants!==false,note:data.note,date:data.date,dueDate:data.dueDate});
       logAudit(`Muutis arvet ${existing.numberStr}`); toast(t("inv_saved")); }
     else{ const n=nextInvoiceNumber(); data.number=n; data.numberStr=invNumberStr(n); data.kind="invoice"; data.viitenumber=makeViitenumber(n); data.createdAt=nowStr(); delete data.__studentId; DB.invoices.push(data);
       logAudit(`Koostas arve ${data.numberStr} · ${data.buyer.name} · ${money(invGross(data))}`); toast(`${t("inv_saved")} — ${data.numberStr}`); }
@@ -5308,7 +5341,7 @@ function invoiceHTML(iv){
         <tr><td style="padding:5px 4px;color:${sub};font-size:13px">Summa käibemaksuta</td><td style="padding:5px 4px;text-align:right;font-family:${mono};font-size:13px">${money(net)}</td></tr>
         <tr><td style="padding:5px 4px;color:${sub};font-size:13px">Käibemaks ${iv.vatRate??24}%</td><td style="padding:5px 4px;text-align:right;font-family:${mono};font-size:13px">${money(vat)}</td></tr>
         <tr style="border-top:1.5px solid ${ink}"><td style="padding:10px 4px;font-family:${disp};font-weight:600;font-size:15px">Tasumisele kuulub</td><td style="padding:10px 4px;text-align:right;font-family:${mono};font-weight:500;font-size:16px;color:${greenD}">${money(gross)}</td></tr></table></div>
-    ${names?`<div style="margin-top:28px">${lbl(`Osalejad (${(iv.participants||[]).length})`)}<div style="font-size:12px;line-height:1.8">${names}</div></div>`:""}
+    ${(names&&iv.showParticipants!==false)?`<div style="margin-top:28px">${lbl(`Osalejad (${(iv.participants||[]).length})`)}<div style="font-size:12px;line-height:1.8">${names}</div></div>`:""}
     <div style="margin-top:28px;background:#F7F6F3;border:1px solid ${line};border-radius:10px;padding:16px 20px">
       ${lbl("Makse rekvisiidid")}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12.5px;line-height:1.6">
@@ -5603,10 +5636,10 @@ function adminEditView(){
         <div class="field"><label>${t("f_passscore")}</label><input data-cf="quizPass" type="number" min="0" max="100" value="${c.quizPass||60}"></div></div>
       <label class="switch" style="margin-bottom:14px"><span class="toggle ${c.openEnroll?"on":""}" data-toggle-enroll></span>${t("f_openenroll")}</label>
       <div class="field" style="margin:0"><label>${t("f_cover")}</label><div class="cover-pick">
-        ${["🌐","🎨","📊","🚀","💡","🧠","📱","⚙️","🔬","🎯"].map(e=>`<div class="cover-opt ${c.emoji===e?"on":""}" data-emoji="${e}">${e}</div>`).join("")}</div></div></div>
-    ${(()=>{const cc=c.cert||{};return `<div class="module" style="padding:20px 22px;margin-top:14px">
-      <div style="font-weight:600;margin-bottom:14px">🏆 ${t("cert_tpl")}</div>
-      <div class="row"><div class="field"><label>${t("cert_header")}</label><input data-cc="headerTitle" value="${esc(cc.headerTitle||"")}"></div>
+        ${["⛑️","🚑","🏥","🩺","💊","💉","🩹","🫀","🩸","🆘","🧠","🔬","🦴","🌐","🎨","📊","🚀","💡","📱","⚙️","🎯","🏆"].map(e=>`<div class="cover-opt ${c.emoji===e?"on":""}" data-emoji="${e}">${e}</div>`).join("")}</div></div></div>
+    ${(()=>{const cc=c.cert||{};const co=certEditorOpen;return `<div class="module" style="padding:20px 22px;margin-top:14px">
+      <div data-cert-toggle style="font-weight:600;display:flex;align-items:center;justify-content:space-between;cursor:pointer;${co?"margin-bottom:14px":"margin:0"}"><span>🏆 ${t("cert_tpl")}</span><span style="font-size:13px;color:var(--muted)">${co?"▲":"▼"}</span></div>
+      ${co?`<div class="row"><div class="field"><label>${t("cert_header")}</label><input data-cc="headerTitle" value="${esc(cc.headerTitle||"")}"></div>
         <div class="field"><label>${t("cert_org")}</label><input data-cc="orgName" value="${esc(cc.orgName||"")}"></div></div>
       <div class="field"><label>${t("cert_intro")}</label><input data-cc="introText" value="${esc(cc.introText||"")}"></div>
       <div class="row"><div class="field"><label>${t("cert_place")}</label><input data-cc="place" value="${esc(cc.place||"")}"></div>
@@ -5621,7 +5654,7 @@ function adminEditView(){
       <div class="row"><div class="field"><label>${t("cert_sign2_name")}</label><input data-cc="sign2Name" value="${esc(cc.sign2Name||"")}"></div>
         <div class="field"><label>${t("cert_sign2_title")}</label><input data-cc="sign2Title" value="${esc(cc.sign2Title||"")}"></div></div>
       <label class="switch" style="margin-bottom:14px"><span class="toggle ${cc.gradesSheet?"on":""}" data-cc-toggle="gradesSheet"></span>${t("cert_grades_sheet")}</label>
-      <div class="field" style="margin:0"><label>${t("cert_logo")}</label>${cc.logo?`<div style="display:flex;align-items:center;gap:10px"><img src="${cc.logo}" style="max-height:44px;border:1px solid var(--border);border-radius:6px"><button class="btn danger sm" data-cc-logo-del>${t("cert_remove")}</button></div>`:`<button class="btn ghost sm" data-cc-logo>🖼️ ${t("cert_upload")}</button>`}</div>
+      <div class="field" style="margin:0"><label>${t("cert_logo")}</label>${cc.logo?`<div style="display:flex;align-items:center;gap:10px"><img src="${cc.logo}" style="max-height:44px;border:1px solid var(--border);border-radius:6px"><button class="btn danger sm" data-cc-logo-del>${t("cert_remove")}</button></div>`:`<button class="btn ghost sm" data-cc-logo>🖼️ ${t("cert_upload")}</button>`}</div>`:""}
     </div>`;})()}
     <div style="display:flex;align-items:center;justify-content:space-between;margin:26px 0 14px"><h2 style="font-size:18px;margin:0">${t("mods_lessons")}</h2><button class="btn sm" data-add-module>＋ ${t("add_module")}</button></div>
     ${c.modules.map((m,mi)=>`<div class="module" style="padding:16px 18px">
@@ -5719,8 +5752,11 @@ function bindGlobal(){
     if(SERVER.mode==="server"){ try{ await api(`/api/requests/${el.dataset.reject}`,{method:"DELETE"}); await hydrateRequests(); render(); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); } return; }
     DB.requests=DB.requests.filter(r=>r.id!==el.dataset.reject);render(); });
   document.querySelectorAll("[data-grade]").forEach(el=>el.onclick=()=>gradeModal(el.dataset.grade));
+  document.querySelectorAll("[data-del-sub]").forEach(el=>el.onclick=()=>{const id=el.dataset.delSub;const x=DB.submissions.find(s=>s.id===id);confirmModal(LANG==="et"?"Kustutada esitatud töö?":"Удалить сданную работу?",async()=>{if(SERVER.mode==="server"){try{await api(`/api/submissions/${id}`,{method:"DELETE"});}catch(e){toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return;}}DB.submissions=DB.submissions.filter(s=>s.id!==id);if(x){const st=studentById(x.studentId);const c=courseById(x.courseId);const h=(c?.homework||[]).find(hh=>hh.id===x.hwId);logAudit(`Kustutas esitatud töö — ${st?fullName(st):""} · ${h?.title||""}`);}render();toast(LANG==="et"?"Töö kustutatud":"Работа удалена");});});
   document.querySelectorAll("[data-rvtab]").forEach(el=>el.onclick=()=>{reviewFilter.course=el.dataset.rvtab;render();});
   document.querySelectorAll("[data-rv-toggle]").forEach(el=>el.onclick=()=>{reviewFilter.ungradedOnly=!reviewFilter.ungradedOnly;render();});
+  const rvg=$("#rv-group"); if(rvg)rvg.onchange=()=>{reviewFilter.group=rvg.value;render();};
+  const rvs=$("#rv-search"); if(rvs)rvs.oninput=()=>{reviewFilter.q=rvs.value;$(".main").innerHTML=adminReviewView();bindGlobal();const f=$("#rv-search");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
   document.querySelectorAll("[data-issue]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.issue.split(":");issueCert(sid,cid);});
   document.querySelectorAll("[data-cert-view]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certView.split(":");showCertificate(sid,cid);});
   document.querySelectorAll("[data-cert-print]").forEach(el=>el.onclick=()=>{const[sid,cid]=el.dataset.certPrint.split(":");printCert(sid,cid);});
@@ -5756,6 +5792,9 @@ function bindGlobal(){
     DB.meetings=DB.meetings.filter(m=>m.id!==mid);render();});
   document.querySelectorAll("[data-thread]").forEach(el=>el.onclick=()=>{view.thread=el.dataset.thread;render();});
   document.querySelectorAll("[data-adm-send]").forEach(el=>el.onclick=()=>sendAdminMsg(el.dataset.admSend));
+  const chs=$("#chat-search"); if(chs)chs.oninput=()=>{chatSearch=chs.value;$(".main").innerHTML=adminMessagesView();bindGlobal();const f=$("#chat-search");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
+  document.querySelectorAll("[data-chat-group]").forEach(el=>el.onclick=groupMessageModal);
+  document.querySelectorAll("[data-chat-del]").forEach(el=>el.onclick=()=>{const sid=el.dataset.chatDel;const s=studentById(sid);confirmModal(LANG==="et"?"Kustutada kogu vestlus?":"Удалить всю переписку?",async()=>{if(SERVER.mode==="server"){try{await api(`/api/messages/thread/${sid}`,{method:"DELETE"});}catch(e){toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return;}}DB.messages=DB.messages.filter(m=>m.studentId!==sid);if(view.thread===sid)view.thread=null;logAudit(`Kustutas vestluse — ${s?fullName(s):""}`);render();toast(LANG==="et"?"Vestlus kustutatud":"Чат удалён");});});
   const aci=$("#adm-chat-in"); if(aci)aci.onkeydown=e=>{if(e.key==="Enter"){const btn=$("[data-adm-send]");if(btn)sendAdminMsg(btn.dataset.admSend);}};
   // students filter
   const sts=$("#st-search"); if(sts) sts.oninput=()=>{studentFilter.q=sts.value;$(".main").innerHTML=adminStudentsView();bindGlobal();const f=$("#st-search");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
@@ -5845,6 +5884,7 @@ function bindEditor(){
   document.querySelectorAll("[data-lcontent]").forEach(el=>el.oninput=()=>{allLessons(c).find(l=>l.id===el.dataset.lcontent).content=el.value;});
   document.querySelectorAll("[data-lvideo]").forEach(el=>el.oninput=()=>{allLessons(c).find(l=>l.id===el.dataset.lvideo).videoUrl=el.value;});
   document.querySelectorAll("[data-edit-quiz]").forEach(el=>el.onclick=()=>editQuiz(c,el.dataset.editQuiz));
+  document.querySelectorAll("[data-cert-toggle]").forEach(el=>el.onclick=()=>{certEditorOpen=!certEditorOpen;render();});
   document.querySelectorAll("[data-cc]").forEach(el=>el.oninput=()=>{c.cert=c.cert||{};c.cert[el.dataset.cc]=el.value;});
   document.querySelectorAll("[data-cc-num]").forEach(el=>el.oninput=()=>{c.cert=c.cert||{};c.cert[el.dataset.ccNum]=+el.value||0;});
   document.querySelectorAll("[data-cc-toggle]").forEach(el=>el.onclick=()=>{c.cert=c.cert||{};c.cert[el.dataset.ccToggle]=!c.cert[el.dataset.ccToggle];scheduleCourseSave();render();});
