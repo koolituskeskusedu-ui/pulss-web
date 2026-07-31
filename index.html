@@ -4351,18 +4351,25 @@ function emailCertModal(sid,cid){
     <div id="cert-send-status" style="font-size:13px;color:var(--muted);margin-top:12px;min-height:18px"></div>
     <div class="modal-foot"><button class="btn ghost" data-close>${t("close")}</button></div></div></div>`;
   const stat=$("#cert-send-status");
-  const send=async(attachment)=>{
-    if(!attachment||!attachment.content){ if(stat){stat.textContent=LANG==="et"?"Faili ei õnnestunud valmistada":"Не удалось подготовить файл";stat.style.color="var(--amber)";} return; }
+  // attachment — вложить файл (PDF); link — ссылка на скачивание (подписанные .asice/.bdoc и т.п., которые Brevo не принимает во вложение).
+  const send=async(attachment,link)=>{
+    if((!attachment||!attachment.content)&&!link){ if(stat){stat.textContent=LANG==="et"?"Faili ei õnnestunud valmistada":"Не удалось подготовить файл";stat.style.color="var(--amber)";} return; }
     if(stat){stat.textContent=LANG==="et"?"Saadan…":"Отправляю…";stat.style.color="var(--muted)";}
     const subj=LANG==="et"?`Tunnistus · ${c.title}`:`Сертификат · ${c.title}`;
-    const body=LANG==="et"?`Tere, ${fullName(s)}!\n\nManuses on Sinu tunnistus kursuse "${c.title}" läbimise eest (nr ${String(ct.number).padStart(3,"0")}).`:`Здравствуйте, ${fullName(s)}!\n\nВо вложении ваш сертификат за курс «${c.title}» (№ ${String(ct.number).padStart(3,"0")}).`;
+    const nr=String(ct.number).padStart(3,"0");
+    let body;
+    if(link){
+      body=LANG==="et"?`Tere, ${fullName(s)}!\n\nSinu tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}) on allalaadimiseks siin:\n${link}`:`Здравствуйте, ${fullName(s)}!\n\nВаш сертификат за курс «${c.title}» (№ ${nr}) можно скачать по ссылке:\n${link}`;
+    }else{
+      body=LANG==="et"?`Tere, ${fullName(s)}!\n\nManuses on Sinu tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}).`:`Здравствуйте, ${fullName(s)}!\n\nВо вложении ваш сертификат за курс «${c.title}» (№ ${nr}).`;
+    }
     const r=await queueEmail(s.email,subj,body,"cert",attachment);
     logAudit(`Saatis tunnistuse → ${s.email} · ${fullName(s)}`);
     $("#modal-root").innerHTML="";
     toast(SERVER.mode==="server"?(r&&r.sent?`📧 ${LANG==="et"?"Saadetud":"Отправлено"}`:(LANG==="et"?"⚠ Saatmine ebaõnnestus":"⚠ Не удалось отправить")):"📧");
   };
-  $("[data-cert-send-pdf]").onclick=async()=>{ if(stat){stat.textContent=LANG==="et"?"Valmistan PDF-i…":"Готовлю PDF…";} const b64=await certPdfBase64(sid,cid); send(b64?{name:`${fullName(s)} — tunnistus.pdf`,content:b64}:null); };
-  $("[data-cert-send-signed]").onclick=()=>{ const inp=document.createElement("input"); inp.type="file"; inp.accept=".pdf,.asice,.bdoc,.ddoc,.edoc,application/pdf"; inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; if(stat){stat.textContent=LANG==="et"?"Laen faili…":"Загружаю файл…";} const rd=new FileReader(); rd.onload=()=>{ const uri=String(rd.result); const i=uri.indexOf("base64,"); const content=i>=0?uri.substring(i+7):null; send(content?{name:f.name,content}:null); }; rd.readAsDataURL(f); }; inp.click(); };
+  $("[data-cert-send-pdf]").onclick=async()=>{ if(stat){stat.textContent=LANG==="et"?"Valmistan PDF-i…":"Готовлю PDF…";} const b64=await certPdfBase64(sid,cid); send(b64?{name:`${fullName(s)} — tunnistus.pdf`,content:b64}:null,null); };
+  $("[data-cert-send-signed]").onclick=()=>{ const inp=document.createElement("input"); inp.type="file"; inp.accept=".pdf,.asice,.bdoc,.ddoc,.edoc,application/pdf"; inp.onchange=async ()=>{ const f=inp.files[0]; if(!f)return; const isPdf=/\.pdf$/i.test(f.name)||f.type==="application/pdf"; if(isPdf){ if(stat){stat.textContent=LANG==="et"?"Laen faili…":"Загружаю файл…";} const rd=new FileReader(); rd.onload=()=>{ const uri=String(rd.result); const i=uri.indexOf("base64,"); const content=i>=0?uri.substring(i+7):null; send(content?{name:f.name,content}:null,null); }; rd.readAsDataURL(f); } else { if(stat){stat.textContent=LANG==="et"?"Laen faili üles…":"Загружаю файл…";} const meta=await uploadFileMeta(f); if(meta&&meta.url&&meta.key){ send(null,meta.url); } else { send(null,null); } } }; inp.click(); };
   document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
 }
 async function generateCertPDF(sid,cid){
