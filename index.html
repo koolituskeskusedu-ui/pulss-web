@@ -4224,12 +4224,24 @@ function gradesView(){
 }
 
 /* ---------- STUDENT CERTS ---------- */
+// Плашки формата сертификата: PDF (сгенерированный, по умолчанию) и DIGIDOC (загруженный подписанный файл).
+const certPdfBadge=`<span class="chip" style="background:#c0392b18;color:#c0392b;font-weight:700;letter-spacing:.03em">📄 PDF</span>`;
+const certDigidocBadge=`<span class="chip" style="background:#0e6db518;color:#0e6db5;font-weight:700;letter-spacing:.03em">🪪 DIGIDOC</span>`;
 function studentCertsView(){
   const s=currentStudent(); const certs=DB.certificates.filter(c=>c.studentId===s.id);
+  const cards=[];
+  certs.forEach(ct=>{ const c=courseById(ct.courseId); if(!c)return; const no=String(ct.number).padStart(3,"0");
+    // PDF — сгенерированный сертификат (по умолчанию)
+    cards.push(`<div class="card clk" data-viewcert="${ct.id}"><div class="cover" style="background:linear-gradient(135deg,${c.color}22,${c.color}0d)">🏆</div>
+      <div class="cbody"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${certPdfBadge}<span class="chip">${t("cert_no")}${no} · ${fmtDate(ct.date)}</span></div><h3>${esc(c.title)}</h3><p>${t("cert_open")}</p></div></div>`);
+    // DIGIDOC — тот же сертификат, но с цифровой подписью (тот же номер)
+    if(ct.signedKey){
+      cards.push(`<a class="card clk" href="${fileUrlFromKey(ct.signedKey)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><div class="cover" style="background:linear-gradient(135deg,#0e6db522,#0e6db50d)">🪪</div>
+      <div class="cbody"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${certDigidocBadge}<span class="chip">${t("cert_no")}${no} · ${fmtDate(ct.date)}</span></div><h3>${esc(c.title)}</h3><p>${LANG==="et"?"Laadi allkirjastatud fail alla":"Скачать файл с подписью"}</p></div></a>`);
+    }
+  });
   return `${topbar(t("t_certs"),t("t_certs_s"))}<div class="content">
-    ${certs.length?`<div class="grid">${certs.map(ct=>{const c=courseById(ct.courseId);
-      return `<div class="card clk" data-viewcert="${ct.id}"><div class="cover" style="background:linear-gradient(135deg,${c.color}22,${c.color}0d)">🏆</div>
-      <div class="cbody"><span class="chip">${t("cert_no")}${String(ct.number).padStart(3,"0")} · ${fmtDate(ct.date)}</span><h3>${esc(c.title)}</h3><p>${t("cert_open")}</p>${ct.signedKey?`<a href="${fileUrlFromKey(ct.signedKey)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="chip" style="margin-top:10px;display:inline-flex;gap:6px;background:var(--brand-soft);color:var(--brand);text-decoration:none;font-weight:600">🔏 ⬇ ${LANG==="et"?"Allkirjastatud fail":"Файл с подписью"}</a>`:""}</div></div>`;}).join("")}</div>`
+    ${cards.length?`<div class="grid">${cards.join("")}</div>`
       :emptyState("🏆",t("no_certs"),LANG==="et"?"Tunnistuse väljastab administraator pärast kursuse lõpetamist":"Сертификат выдаёт администратор после завершения курса")}</div>`;
 }
 // Круглая печать pulss. (SVG) — рендерится в html2canvas.
