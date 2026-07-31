@@ -3665,20 +3665,28 @@ async function api(path,{method="GET",body=null}={}){
 }
 async function serverHealth(){ try{ const h=await api("/api/health"); SERVER.online=!!(h&&h.ok); return h; }catch(e){ SERVER.online=false; return null; } }
 
-// Загрузка файла: на сервере → в R2 (возвращает URL), в демо → base64 (data-URL).
-async function uploadFile(file){
+// Загрузка файла: на сервере → в R2 ({url,key}), в демо → base64 ({url,key:null}).
+async function uploadFileMeta(file){
   if(SERVER.mode==="server"){
     try{
       const res=await fetch(API_BASE+"/api/files",{ method:"POST", credentials:"include",
         headers:{ "Content-Type":file.type||"application/octet-stream", "X-File-Name":encodeURIComponent(file.name||"file") },
         body:file });
       const d=await res.json().catch(()=>null);
-      if(res.ok&&d&&d.url) return d.url;
+      if(res.ok&&d&&d.url) return { url:d.url, key:d.key||null };
     }catch(e){}
     // если сервер не принял — не теряем файл, кладём как base64
   }
-  return await new Promise(resolve=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.readAsDataURL(file); });
+  const url=await new Promise(resolve=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.readAsDataURL(file); });
+  return { url, key:null };
 }
+async function uploadFile(file){ return (await uploadFileMeta(file)).url; }
+// Ключ R2 → абсолютный URL для отдачи файла.
+function fileUrlFromKey(key){ return key?(API_BASE+"/api/files/"+key):""; }
+// Сдача с сервера → объект для DB.submissions.
+function mapSubmission(x){ const g=x.grade; const grade=(g===null||g===undefined||g==="")?null:(/^-?\d+$/.test(String(g))?+g:g);
+  return { id:x.id, studentId:x.student_id, courseId:x.course_id, hwId:x.homework_id, fileName:x.file_name||"",
+    fileUrl:fileUrlFromKey(x.file_key), date:x.date||"", grade, feedback:x.feedback||"", gradedBy:x.graded_by||"", gradedAt:x.graded_at||"" }; }
 
 // Перенос профиля с сервера в текущую сессию
 function applyServerSession(me){
@@ -3704,7 +3712,23 @@ async function hydrateReference(){
   try{ const gs=await api("/api/groups"); if(Array.isArray(gs)) DB.groups=gs.map(g=>({id:g.id,name:g.name})); }catch(e){}
   try{ const studs=await api("/api/students"); if(Array.isArray(studs)) DB.students=studs.map(mapStudent); }catch(e){}
   try{ const cs=await api("/api/courses"); if(Array.isArray(cs)) DB.courses=cs; }catch(e){}
+  await hydrateLearning();
   if(DB.session&&DB.session.role!=="student") await hydrateRequests();
+}
+// Гидрация записей на курсы, прогресса, тестов и сдач домашек с сервера.
+async function hydrateLearning(){
+  try{
+    const L=await api("/api/learning"); if(!L)return;
+    DB.students.forEach(s=>{ s.courses=[]; });
+    (L.enrollments||[]).forEach(e=>{ const s=studentById(e.student_id); if(s&&!s.courses.includes(e.course_id)) s.courses.push(e.course_id); });
+    DB.progress={};
+    (L.progress||[]).forEach(p=>{ DB.progress[p.student_id]=DB.progress[p.student_id]||{}; (DB.progress[p.student_id][p.course_id]=DB.progress[p.student_id][p.course_id]||new Set()).add(p.lesson_id); });
+    DB.quizScores={}; DB.quizAttempts={};
+    (L.quiz_scores||[]).forEach(q=>{ DB.quizScores[q.student_id]=DB.quizScores[q.student_id]||{}; DB.quizScores[q.student_id][q.lesson_id]=q.score; });
+    (L.quiz_attempts||[]).forEach(q=>{ let ans={},lay={}; try{ans=JSON.parse(q.answers_json||"{}");}catch(e){} try{lay=JSON.parse(q.layout_json||"{}");}catch(e){}
+      DB.quizAttempts[q.student_id]=DB.quizAttempts[q.student_id]||{}; DB.quizAttempts[q.student_id][q.lesson_id]={answers:ans,layout:lay}; });
+    DB.submissions=(L.submissions||[]).map(mapSubmission);
+  }catch(e){}
 }
 /* --- Фаза 4а: курсы --- */
 let _courseSaveTimer=null, _courseSaving=false;
@@ -4119,9 +4143,19 @@ function homeworkView(){
 }
 function submitHomework(cid,hid){
   const s=currentStudent(); const inp=document.createElement("input"); inp.type="file";
-  inp.onchange=()=>{ const fname=inp.files[0]?.name||`töö_${hid}.pdf`; let sub=submissionFor(s.id,hid);
-    if(sub){sub.fileName=fname;sub.date=today();sub.grade=null;sub.feedback="";}
-    else DB.submissions.push({id:uid("sub"),studentId:s.id,courseId:cid,hwId:hid,fileName:fname,date:today(),grade:null,feedback:""});
+  inp.onchange=async()=>{ const file=inp.files[0]; const fname=file?.name||`töö_${hid}.pdf`;
+    let meta={url:"",key:null};
+    if(file){ toast(LANG==="et"?"Laen üles…":"Загрузка…"); meta=await uploadFileMeta(file); }
+    if(SERVER.mode==="server"){ try{ const res=await api("/api/submissions",{method:"POST",body:{course_id:cid,homework_id:hid,file_name:fname,file_key:meta.key}});
+        let sub=submissionFor(s.id,hid);
+        if(sub){ sub.fileName=fname; sub.fileUrl=meta.url; sub.date=today(); sub.grade=null; sub.feedback=""; }
+        else DB.submissions.push({id:res?.id||uid("sub"),studentId:s.id,courseId:cid,hwId:hid,fileName:fname,fileUrl:meta.url,date:today(),grade:null,feedback:""});
+      }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; }
+    } else {
+      let sub=submissionFor(s.id,hid);
+      if(sub){sub.fileName=fname;sub.fileUrl=meta.url;sub.date=today();sub.grade=null;sub.feedback="";}
+      else DB.submissions.push({id:uid("sub"),studentId:s.id,courseId:cid,hwId:hid,fileName:fname,fileUrl:meta.url,date:today(),grade:null,feedback:""});
+    }
     touch(s.id); render(); toast(t("hw_sent")); };
   inp.click();
 }
@@ -4603,8 +4637,14 @@ function studentCard(sid){
   $("[data-sc-save]").onclick=async()=>{collect();if(!data.firstName||!data.lastName||!data.isikukood){toast(LANG==="et"?"Täida nimi ja isikukood":"Заполните имя и личный код");return;}
     if(!validateIsikukood(data.isikukood).valid){toast(t("ik_invalid"));showIkStatus(data.isikukood,$("#sc-code-status"));return;}
     if(SERVER.mode==="server"){ const b={first_name:data.firstName,last_name:data.lastName,isikukood:data.isikukood,email:data.email,group_id:data.groupId};
-      try{ if(isNew){ const res=await api("/api/students",{method:"POST",body:b}); await rehydrateStudents(); $("#modal-root").innerHTML=""; render(); showCredentials({firstName:data.firstName,lastName:data.lastName,password:res.password}); }
-        else{ await api(`/api/students/${data.id}`,{method:"PUT",body:b}); await rehydrateStudents(); toast(t("saved")); $("#modal-root").innerHTML=""; render(); } }
+      try{ if(isNew){ const res=await api("/api/students",{method:"POST",body:b});
+          for(const cid of data.courses){ try{ await api("/api/enroll",{method:"POST",body:{student_id:res.id,course_id:cid}}); }catch(e){} }
+          await rehydrateStudents(); await hydrateLearning(); $("#modal-root").innerHTML=""; render(); showCredentials({firstName:data.firstName,lastName:data.lastName,password:res.password}); }
+        else{ await api(`/api/students/${data.id}`,{method:"PUT",body:b});
+          const before=s.courses||[], after=data.courses;
+          for(const cid of after.filter(c=>!before.includes(c))){ try{ await api("/api/enroll",{method:"POST",body:{student_id:data.id,course_id:cid}}); }catch(e){} }
+          for(const cid of before.filter(c=>!after.includes(c))){ try{ await api("/api/enroll",{method:"DELETE",body:{student_id:data.id,course_id:cid}}); }catch(e){} }
+          await rehydrateStudents(); await hydrateLearning(); toast(t("saved")); $("#modal-root").innerHTML=""; render(); } }
       catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); } return; }
     if(isNew){ data.password=genPassword(); DB.students.push(data); const em=credEmail(data); queueEmail(data.email,em.s,em.b,"cred"); render(); showCredentials(data); }
     else{Object.assign(s,data);toast(t("saved"));$("#modal-root").innerHTML="";render();}};
@@ -4660,8 +4700,10 @@ function bulkEnrollModal(){
     <div class="field"><label>${t("f_course")}</label><select id="be-course"><option value="">${t("pick_course_ph")}</option>${DB.courses.map(c=>`<option value="${c.id}">${esc(c.title)}</option>`).join("")}</select></div>
     <div class="modal-foot"><button class="btn ghost" data-close>${t("close")}</button><button class="btn primary" data-be-do>${t("bulk_enroll_do")}</button></div>
   </div></div>`;
-  $("[data-be-do]").onclick=()=>{const gid=$("#be-group").value,cid=$("#be-course").value; if(!gid||!cid){toast(t("pick_group_first"));return;}
-    let n=0; DB.students.filter(s=>s.groupId===gid).forEach(s=>{if(!s.courses.includes(cid)){s.courses.push(cid);n++;}});
+  $("[data-be-do]").onclick=async()=>{const gid=$("#be-group").value,cid=$("#be-course").value; if(!gid||!cid){toast(t("pick_group_first"));return;}
+    const targets=DB.students.filter(s=>s.groupId===gid&&!s.courses.includes(cid)); let n=0;
+    if(SERVER.mode==="server"){ for(const s of targets){ try{ await api("/api/enroll",{method:"POST",body:{student_id:s.id,course_id:cid}}); s.courses.push(cid); n++; }catch(e){} } }
+    else targets.forEach(s=>{s.courses.push(cid);n++;});
     $("#modal-root").innerHTML=""; render(); toast(`${t("enrolled_group")} (${n})`); };
   document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
 }
@@ -4774,7 +4816,7 @@ function gradeModal(subId){
   const x=DB.submissions.find(s=>s.id===subId);const s=studentById(x.studentId);const c=courseById(x.courseId);const h=(c?.homework||[]).find(h=>h.id===x.hwId);
   $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" onclick="event.stopPropagation()">
     <h2>${t("grade_hw")}</h2><div class="msub">${esc(fullName(s))} · ${esc(h?.title||"")}</div>
-    <div style="padding:11px 14px;background:var(--surface-2);border-radius:10px;margin-bottom:16px;font-size:13.5px">📎 ${esc(x.fileName)} · ${fmtDate(x.date)}</div>
+    <div style="padding:11px 14px;background:var(--surface-2);border-radius:10px;margin-bottom:16px;font-size:13.5px">📎 ${x.fileUrl?`<a class="link" href="${x.fileUrl}" target="_blank" rel="noopener" download="${esc(x.fileName)}">${esc(x.fileName)}</a>`:esc(x.fileName)} · ${fmtDate(x.date)}</div>
     <div class="field"><label>${t("grade")} (0–100 / ARV / MA)</label>
       <div style="display:flex;gap:8px;align-items:center"><input id="gr-val" type="number" min="0" max="100" value="${isNumGrade(x.grade)?x.grade:""}" style="flex:1">
       <button class="btn ${x.grade==="ARV"?"ok":""}" type="button" data-gr-set="ARV">ARV</button>
@@ -4782,7 +4824,8 @@ function gradeModal(subId){
       <div class="hint">ARV — arvestatud, MA — mittearvestatud</div></div>
     <div class="field"><label>${t("feedback")}</label><textarea id="gr-fb">${esc(x.feedback||"")}</textarea></div>
     <div class="modal-foot"><button class="btn ghost" data-close>${t("close")}</button><button class="btn primary" data-gr-save>${t("save")}</button></div></div></div>`;
-  const finish=(val)=>{ x.grade=val; x.feedback=$("#gr-fb").value.trim(); x.gradedBy=currentStaff()?.name||t("admin"); x.gradedAt=today();
+  const finish=async(val)=>{ x.grade=val; x.feedback=$("#gr-fb").value.trim(); x.gradedBy=currentStaff()?.name||t("admin"); x.gradedAt=today();
+    if(SERVER.mode==="server"){ try{ await api(`/api/submissions/${x.id}/grade`,{method:"PUT",body:{grade:val,feedback:x.feedback,graded_by:x.gradedBy}}); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; } }
     const gtxt=isNumGrade(val)?val+"/100":val;
     const em=buildEmail("grade",{student:fullName(s),course:c.title,task:h.title,grade:gtxt},()=>emailGraded(c,h,gtxt)); queueEmail(s.email,em.s,em.b,"grade");
     pushNotif(s.id,`${LANG==="et"?"Töö hinnatud":"Работа оценена"}: ${h.title} — ${gtxt}`,"grade","grades"); logAudit(`Оценил «${h.title}» ${fullName(s)}: ${gtxt}`);
@@ -5592,7 +5635,9 @@ function bindGlobal(){
   document.querySelectorAll("[data-lesson]").forEach(el=>el.onclick=()=>{const[cid,lid]=el.dataset.lesson.split(":");go("lesson",{courseId:cid,lessonId:lid});});
   document.querySelectorAll("[data-start]").forEach(el=>el.onclick=()=>go("lesson",{courseId:view.courseId,lessonId:el.dataset.start}));
   document.querySelectorAll("[data-complete]").forEach(el=>el.onclick=()=>completeLesson(el.dataset.complete));
-  document.querySelectorAll("[data-enroll]").forEach(el=>el.onclick=()=>{const s=currentStudent();if(!s.courses.includes(el.dataset.enroll))s.courses.push(el.dataset.enroll);touch(s.id);render();toast(t("enrolled_ok"));});
+  document.querySelectorAll("[data-enroll]").forEach(el=>el.onclick=async()=>{const s=currentStudent();const cid=el.dataset.enroll;
+    if(SERVER.mode==="server"){ try{ await api("/api/enroll",{method:"POST",body:{course_id:cid}}); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера");return; } }
+    if(!s.courses.includes(cid))s.courses.push(cid);touch(s.id);render();toast(t("enrolled_ok"));});
   document.querySelectorAll("[data-qopt]").forEach(el=>el.onclick=()=>{const[pos,disp]=el.dataset.qopt.split(":").map(Number);const lid=view.lessonId;const sid=DB.session.studentId;
     if(DB.quizScores[sid]?.[lid]!==undefined||!quizDraft[lid])return; quizDraft[lid].answers[pos]=disp; render();});
   document.querySelectorAll("[data-quiz-submit]").forEach(el=>el.onclick=()=>{const lid=el.dataset.quizSubmit;const c=courseById(view.courseId);const l=allLessons(c).find(x=>x.id===lid);const st=quizDraft[lid]; if(!st)return;
@@ -5600,7 +5645,9 @@ function bindGlobal(){
     let correct=0; st.layout.items.forEach((it,i)=>{ const origOi=it.opts[st.answers[i]]; if(origOi===l.quiz.questions[it.qi].correct)correct++; });
     const pct=Math.round(correct/st.layout.items.length*100);
     const sid=DB.session.studentId; DB.quizScores[sid]=DB.quizScores[sid]||{}; DB.quizScores[sid][lid]=pct;
-    DB.quizAttempts[sid]=DB.quizAttempts[sid]||{}; DB.quizAttempts[sid][lid]={layout:st.layout,answers:{...st.answers}}; delete quizDraft[lid]; touch(sid); render();});
+    DB.quizAttempts[sid]=DB.quizAttempts[sid]||{}; DB.quizAttempts[sid][lid]={layout:st.layout,answers:{...st.answers}}; delete quizDraft[lid];
+    if(SERVER.mode==="server"){ api("/api/quiz-results",{method:"POST",body:{lesson_id:lid,score:pct,answers:st.answers,layout:st.layout}}).catch(()=>{}); }
+    touch(sid); render();});
   document.querySelectorAll("[data-submit-hw]").forEach(el=>el.onclick=()=>{const[cid,hid]=el.dataset.submitHw.split(":");submitHomework(cid,hid);});
   document.querySelectorAll("[data-hwexp]").forEach(el=>el.onclick=()=>{const id=el.dataset.hwexp;hwOpen.has(id)?hwOpen.delete(id):hwOpen.add(id);render();});
   document.querySelectorAll("[data-viewcert]").forEach(el=>el.onclick=()=>{const ct=DB.certificates.find(c=>c.id===el.dataset.viewcert);showCertificate(ct.studentId,ct.courseId);});
@@ -5715,6 +5762,7 @@ function bindGlobal(){
 }
 function completeLesson(key){
   const[cid,lid]=key.split(":");const sid=DB.session.studentId;ensureProg(sid,cid).add(lid);touch(sid);
+  if(SERVER.mode==="server"){ api("/api/progress",{method:"POST",body:{course_id:cid,lesson_id:lid}}).catch(()=>{}); }
   const c=courseById(cid);const flat=allLessons(c);const next=flat[flat.findIndex(l=>l.id===lid)+1];
   if(isCourseComplete(sid,c)){go("course",{courseId:cid});toast(t("course_done"));return;}
   if(next)go("lesson",{courseId:cid,lessonId:next.id});else go("course",{courseId:cid});toast(t("lesson_done"));
