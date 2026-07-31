@@ -3115,14 +3115,14 @@ const I18N = {
   pick_group:{ru:"— выберите группу —",et:"— vali rühm —"},
   t_catalog:{ru:"Каталог курсов",et:"Kursuste kataloog"}, t_catalog_s:{ru:"Доступные курсы платформы",et:"Platvormi saadaolevad kursused"},
   t_my:{ru:"Мои курсы",et:"Minu kursused"}, t_my_s:{ru:"Курсы, на которые вы записаны",et:"Kursused, kuhu oled registreeritud"},
-  modules:{ru:"модуля",et:"moodulit"}, lessons:{ru:"уроков",et:"õppetundi"}, done_of:{ru:"пройдено",et:"läbitud"},
+  modules:{ru:"модуля",et:"moodulit"}, lessons:{ru:"уроков",et:"tundi"}, done_of:{ru:"пройдено",et:"läbitud"},
   enroll:{ru:"Записаться",et:"Registreeru"}, enrolled:{ru:"Вы записаны",et:"Oled registreeritud"},
   enroll_closed:{ru:"Запись закрыта",et:"Registreerumine suletud"},
   start:{ru:"Начать курс",et:"Alusta kursust"}, cont:{ru:"Продолжить",et:"Jätka"},
   program:{ru:"Программа курса",et:"Kursuse kava"}, min:{ru:"мин",et:"min"},
   ltype_text:{ru:"Текст",et:"Tekst"}, ltype_video:{ru:"Видео",et:"Video"}, ltype_quiz:{ru:"Тест",et:"Test"},
   mark_next:{ru:"Отметить пройденным и далее →",et:"Märgi läbituks ja edasi →"},
-  finish_lesson:{ru:"Завершить урок",et:"Lõpeta õppetund"}, back:{ru:"Назад",et:"Tagasi"}, to_course:{ru:"К курсу",et:"Kursuse juurde"},
+  finish_lesson:{ru:"Завершить урок",et:"Lõpeta tund"}, back:{ru:"Назад",et:"Tagasi"}, to_course:{ru:"К курсу",et:"Kursuse juurde"},
   quiz_intro:{ru:"Ответьте на вопросы. Проходной балл",et:"Vasta küsimustele. Läbimislävi"},
   quiz_check:{ru:"Проверить ответы",et:"Kontrolli vastuseid"}, quiz_passed:{ru:"Тест пройден 🎉",et:"Test läbitud 🎉"},
   quiz_fail:{ru:"Тест не пройден",et:"Test läbimata"}, quiz_retry:{ru:"Пройти заново",et:"Proovi uuesti"},
@@ -3208,7 +3208,7 @@ const I18N = {
   t_meetingsS:{ru:"Мои встречи",et:"Minu kohtumised"}, t_meetingsS_s:{ru:"Онлайн-занятия вашей группы",et:"Sinu rühma veebitunnid"},
   pick_course_ph:{ru:"— выберите курс —",et:"— vali kursus —"}, meet_recipients:{ru:"Получат уведомление",et:"Saavad teate"},
   notify_students:{ru:"Уведомить о задании",et:"Teavita ülesandest"}, notif_queued:{ru:"уведомл. в очереди",et:"teadet järjekorras"},
-  outbox_title:{ru:"Очередь уведомлений",et:"Teadete järjekord"}, outbox_hint:{ru:"Демо: почта подключится позже, пока письма копятся здесь.",et:"Demo: e-post ühendatakse hiljem, praegu kogunevad kirjad siia."},
+  outbox_title:{ru:"Журнал писем",et:"E-kirjade logi"}, outbox_hint:{ru:"История отправленных писем.",et:"Saadetud kirjade ajalugu."},
   outbox_empty:{ru:"Очередь пуста",et:"Järjekord on tühi"}, outbox_to:{ru:"Кому",et:"Saaja"}, outbox_subj:{ru:"Тема",et:"Teema"},
   ltype_meet:{ru:"Встреча",et:"Kohtumine"}, when_col:{ru:"Когда",et:"Millal"}, del:{ru:"Удалить",et:"Kustuta"},
   meet_edit:{ru:"Редактировать встречу",et:"Muuda kohtumist"}, meet_actual:{ru:"Актуальные",et:"Aktuaalsed"}, meet_archive:{ru:"Архив",et:"Arhiiv"},
@@ -3459,8 +3459,8 @@ const typeName=tp=>({text:I18N.ltype_text[LANG],video:I18N.ltype_video[LANG],qui
 function ytEmbed(url){ if(!url)return""; if(url.includes("/embed/"))return url; const m=url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})/); return m?"https://www.youtube.com/embed/"+m[1]:url; }
 const submissionFor=(sid,hwId)=>DB.submissions.find(s=>s.studentId===sid&&s.hwId===hwId);
 const certFor=(sid,cid)=>DB.certificates.find(c=>c.studentId===sid&&c.courseId===cid);
-function today(){ return new Date().toISOString().slice(0,10); }
-function nowStr(){ return new Date().toISOString().slice(0,16).replace("T"," "); }
+function nowStr(){ try{ return new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Tallinn",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date()); }catch(e){ return new Date().toISOString().slice(0,16).replace("T"," "); } }
+function today(){ return nowStr().slice(0,10); }
 function addDays(dateStr,days){ const d=new Date(dateStr); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
 function addMonths(dateStr,m){ const d=new Date(dateStr); d.setMonth(d.getMonth()+Number(m)); return d.toISOString().slice(0,10); }
 function certValidUntil(ct){ return ct.validUntil||addMonths(ct.date,(courseById(ct.courseId)?.cert?.validMonths)||DB.settings.certValidMonths); }
@@ -3810,7 +3810,7 @@ function authView(){
   if(view.name==="verify") return verifyView();
   return `<div class="auth-wrap">${authSide()}<div class="auth-main"><div class="auth-top">${langToggle()}</div>
     <div class="auth-box"><h1>${t("login_t")}</h1><div class="lead">${t("login_lead")}</div>
-      <div class="field"><label>${t("f_login")}</label><input id="li-name" placeholder="Андрей Смагин"></div>
+      <div class="field"><label>${t("f_login")}</label><input id="li-name" placeholder=""></div>
       <div class="field"><label>${t("f_pass")}</label><input id="li-pass" type="password" placeholder="••••••••"></div>
       <button class="btn primary" id="li-btn" style="width:100%;justify-content:center;margin-top:4px">${t("login_btn")}</button>
       <div style="margin-top:14px;font-size:13.5px;color:var(--muted)">${t("no_acc")} <span class="link" data-goreg>${t("reg_link")} →</span></div>
@@ -4031,11 +4031,11 @@ function emptyState(icon,title,text,btn,nav){
 
 /* ---------- STUDENT: courses ---------- */
 function courseCard(c,enrolled){
-  const sid=DB.session.studentId; const pr=courseProgress(sid,c); const started=pr.done>0;
-  return `<div class="card clk" data-course="${c.id}">
+  const sid=DB.session.studentId; const pr=courseProgress(sid,c); const started=pr.done>0; const done=enrolled&&isCourseComplete(sid,c);
+  return `<div class="card clk${done?" done":""}" data-course="${c.id}" style="${done?"opacity:.55;filter:grayscale(.6)":""}">
     <div class="cover" style="background:linear-gradient(135deg,${c.color}22,${c.color}0d)">${c.emoji}</div>
-    <div class="cbody"><span class="chip">${esc(c.category)}</span><h3>${esc(c.title)}</h3><p>${esc(c.description)}</p>
-      ${enrolled&&started?`<div class="progress-track"><div class="progress-fill" style="width:${pr.pct}%"></div></div><div style="font-size:12px;color:var(--muted)">${pr.done}/${pr.total} ${t("lessons")} · ${pr.pct}%</div>`:""}
+    <div class="cbody"><span class="chip">${esc(c.category)}</span><h3>${esc(c.title)}${done?` <span class="badge green" style="vertical-align:middle;filter:grayscale(0)">✓ ${LANG==="et"?"Läbitud":"Пройдено"}</span>`:""}</h3><p>${esc(c.description)}</p>
+      ${enrolled&&started&&!done?`<div class="progress-track"><div class="progress-fill" style="width:${pr.pct}%"></div></div><div style="font-size:12px;color:var(--muted)">${pr.done}/${pr.total} ${t("lessons")} · ${pr.pct}%</div>`:""}
       <div class="meta"><span>📚 ${c.modules.length} ${t("modules")}</span><span>📄 ${allLessons(c).length} ${t("lessons")}</span></div></div></div>`;
 }
 function myCoursesView(){
@@ -4367,7 +4367,9 @@ function showCertificate(sid,cid){
 /* ---------- STUDENT CHAT ---------- */
 function chatView(){
   const s=currentStudent();
+  const _unreadAdm=DB.messages.some(m=>m.studentId===s.id&&m.from==="admin"&&!m.read);
   DB.messages.filter(m=>m.studentId===s.id&&m.from==="admin").forEach(m=>m.read=true);
+  if(SERVER.mode==="server"&&_unreadAdm){ api("/api/messages/read",{method:"POST"}).catch(()=>{}); }
   const msgs=threadMsgs(s.id);
   return `${topbar(t("t_chat"),t("t_chat_s"))}<div class="content" style="max-width:none">
     <div class="chat-layout" style="grid-template-columns:1fr;min-height:calc(100vh - 150px)"><div class="chat-main" style="min-height:calc(100vh - 150px)">
@@ -4907,7 +4909,7 @@ function adminMessagesView(){
   const scope=scopedStudentIds();
   const ids=studentsWithMsgs().filter(id=>scope.has(id));
   const sel=view.thread||ids.find(id=>lastMsg(id)?.from==="student")||ids[0]||null;
-  if(sel) DB.messages.filter(m=>m.studentId===sel&&m.from==="student").forEach(m=>m.read=true);
+  if(sel){ const _unreadStud=DB.messages.some(m=>m.studentId===sel&&m.from==="student"&&!m.read); DB.messages.filter(m=>m.studentId===sel&&m.from==="student").forEach(m=>m.read=true); if(SERVER.mode==="server"&&_unreadStud){ api("/api/messages/read",{method:"POST",body:{student_id:sel}}).catch(()=>{}); } }
   const msgs=sel?threadMsgs(sel):[];
   const selS=sel?studentById(sel):null;
   const q=chatSearch.toLowerCase().trim();
@@ -5559,7 +5561,7 @@ function settingsView(){
       <div style="display:flex;justify-content:flex-end"><button class="btn primary" data-seller-save>${t("save")}</button></div>
     </div>`;
   } else if(settingsTab==="templates"){
-    body=`<h2 style="font-size:16px;margin:0 0 4px">📧 ${t("outbox_title")} ${DB.outbox.length?`<span class="badge blue">${DB.outbox.length}</span>`:""}</h2>
+    body=`<h2 style="font-size:16px;margin:0 0 4px">📧 ${t("outbox_title")}</h2>
     <div class="sub" style="color:var(--muted);font-size:13px;margin-bottom:16px">${t("outbox_hint")}</div>
     ${DB.outbox.length?`<table class="table"><thead><tr><th>${t("when_col")}</th><th>${t("outbox_to")}</th><th>${t("outbox_subj")}</th></tr></thead><tbody>
       ${DB.outbox.slice(0,25).map(e=>`<tr><td style="color:var(--muted);white-space:nowrap;font-size:13px">${fmtWhen(e.ts)}</td><td style="color:var(--muted)">${esc(e.to)}</td><td><b style="font-weight:600">${esc(e.subject)}</b><div style="font-size:12px;color:var(--faint)">${esc(e.body)}</div></td></tr>`).join("")}
@@ -5672,7 +5674,7 @@ const ONB={ admin:[
     {ic:"🔔",ru:["Уведомления и календарь","Колокольчик покажет новое, а календарь — встречи и дедлайны."],et:["Teated ja kalender","Kell näitab uut, kalender kohtumisi ja tähtaegu."]},
   ] };
 let onbSeen={};
-function maybeOnboard(){ const r=DB.session.role; const key=r==="teacher"?"teacher":r==="admin"?"admin":"student"; if(onbSeen[key])return; onbSeen[key]=true; setTimeout(()=>onboard(key,0),300); }
+function maybeOnboard(){ /* Обучение при входе отключено. Доступно вручную по кнопке «?». */ }
 function onboard(key,i){
   const steps=ONB[key]; if(!steps||i>=steps.length){$("#modal-root").innerHTML="";return;}
   const s=steps[i]; const txt=s[LANG]||s.ru;
