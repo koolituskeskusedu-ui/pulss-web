@@ -3089,7 +3089,7 @@ const I18N = {
   audit_who:{ru:"Кто",et:"Kes"}, audit_action:{ru:"Действие",et:"Tegevus"}, audit_search:{ru:"Поиск по журналу…",et:"Otsi logist…"}, no_audit:{ru:"Записей нет",et:"Kirjeid pole"},
   tpl_title:{ru:"Шаблоны писем",et:"Kirjade mallid"}, tpl_hint:{ru:"Переменные в {фигурных скобках} подставляются автоматически.",et:"{Loogelistes sulgudes} muutujad asendatakse automaatselt."},
   tpl_subject:{ru:"Тема",et:"Teema"}, tpl_body:{ru:"Текст",et:"Tekst"}, tpl_vars:{ru:"Переменные",et:"Muutujad"}, tpl_reset:{ru:"Сбросить",et:"Taasta"},
-  tpl_hw:{ru:"Новое задание",et:"Uus kodutöö"}, tpl_grade:{ru:"Оценка выставлена",et:"Hinne pandud"}, tpl_meet:{ru:"Встреча создана",et:"Kohtumine loodud"}, tpl_cred:{ru:"Данные для входа",et:"Sisselogimisandmed"}, templates_saved:{ru:"Шаблоны сохранены",et:"Mallid salvestatud"},
+  tpl_hw:{ru:"Новое задание",et:"Uus kodutöö"}, tpl_grade:{ru:"Оценка выставлена",et:"Hinne pandud"}, tpl_meet:{ru:"Встреча создана",et:"Kohtumine loodud"}, tpl_cred:{ru:"Приветствие + доступ",et:"Tervitus + ligipääs"}, tpl_reg:{ru:"Спасибо за регистрацию",et:"Aitäh registreerumast"}, tpl_cert:{ru:"Поздравление с сертификатом",et:"Õnnitlus tunnistusega"}, templates_saved:{ru:"Шаблоны сохранены",et:"Mallid salvestatud"},
   cert_tpl:{ru:"Шаблон сертификата",et:"Tunnistuse mall"}, cert_logo:{ru:"Логотип",et:"Logo"}, cert_sign_name:{ru:"Подпись (имя)",et:"Allkiri (nimi)"},
   cert_sign_title:{ru:"Должность",et:"Ametikoht"}, cert_stamp:{ru:"Печать (текст)",et:"Pitsat (tekst)"}, cert_descr:{ru:"Описание на сертификате",et:"Tunnistuse kirjeldus"},
   cert_upload:{ru:"Загрузить",et:"Laadi üles"}, cert_remove:{ru:"Убрать",et:"Eemalda"},
@@ -3336,11 +3336,13 @@ const DB={
     invoiceSeq:0, invoiceDefaultPrice:65, invoiceDueDays:14, invoiceVatRate:24, invoicePriceIncludesVat:false,
     seller:{ name:"EDU KOOLITUS OÜ", regCode:"17217212", vatNo:"", address:"Tallinn, Eesti", iban:"EE00 0000 0000 0000 0000", bank:"", email:"andrei@dodopizza.ee", phone:"" },
     templates:{
-      cred:{subject:"Ligipääs platvormile — {platform}", body:"Tere, {student}!\nSinu kasutajanimi: {login}\nParool: {password}\nPalun muuda parool esimesel sisenemisel."},
-      hw:{subject:"Uus kodutöö · {course}", body:"{student}, kursusele «{course}» lisati ülesanne «{task}». Tähtaeg: {deadline}."},
-      grade:{subject:"Töö hinnatud · {course}", body:"{student}, sinu töö «{task}» on hinnatud: {grade}."},
-      meet:{subject:"Veebikohtumine · {course}", body:"{student}, rühmale {group} on määratud kohtumine: {datetime}. {link}"},
-      invoice:{subject:"Arve {number} — {seller}", body:"Tere!\nLisatud on arve {number} summas {gross} € (koos käibemaksuga).\nMaksetähtaeg: {due}.\nPalume tasuda arvel toodud arvelduskontole.\n\nLugupidamisega,\n{seller}"},
+      cred:{subject:"Tere tulemast! Sinu ligipääs — {platform}", body:"Tere, {student}!\n\nTere tulemast {platform} õpikeskkonda — meil on väga hea meel, et liitusid!\n\nSiin on Sinu ligipääsuandmed:\nKasutajanimi: {login}\nParool: {password}\n\nPalun logi sisse ja muuda parool esimesel korral ära. Platvormil leiad oma kursused, materjalid, kodutööd ja tunnistused.\n\nKui midagi jääb segaseks, vasta lihtsalt sellele kirjale — aitame alati hea meelega.\n\nHead õppimist!"},
+      reg:{subject:"Aitäh registreerumast! — {platform}", body:"Tere, {student}!\n\nSuur aitäh, et registreerusid meie koolitusele. Sinu taotlus on meieni jõudnud ja ootab kinnitamist.\n\nNiipea kui oleme selle üle vaadanud, saadame Sulle eraldi kirja koos ligipääsuandmetega platvormile.\n\nKui Sul on vahepeal küsimusi, vasta julgelt sellele kirjale.\n\nKohtumiseni koolitusel!"},
+      hw:{subject:"Uus kodutöö kursusel «{course}»", body:"Tere, {student}!\n\nKursusele «{course}» on lisatud uus ülesanne: «{task}».\nEsitamise tähtaeg: {deadline}.\n\nLeiad selle oma kontol kursuse juures. Jõudu tööle — ja küsi julgelt, kui abi vajad!\n\nHead õppimist!"},
+      grade:{subject:"Sinu töö on hinnatud — {course}", body:"Tere, {student}!\n\nSinu töö «{task}» kursusel «{course}» on üle vaadatud.\nTulemus: {grade}.\n\nAitäh esitatud töö eest! Täpsemat tagasisidet näed oma kontol. Kui tekib küsimusi, anna julgelt teada.\n\nEdu edaspidiseks!"},
+      meet:{subject:"Veebikohtumine kursusel «{course}»", body:"Tere, {student}!\n\nRühmale {group} on planeeritud veebikohtumine.\nAeg: {datetime}\n{link}\n\nOotame Sind! Palun liitu paar minutit varem, et kõik jõuaks rahulikult alata.\n\nKohtumiseni!"},
+      cert:{subject:"Palju õnne! Sinu tunnistus — {course}", body:"Tere, {student}!\n\nPalju õnne kursuse «{course}» eduka läbimise puhul!\n\nSinu tunnistus (nr {number}) on valmis — leiad selle manusest ja alati ka oma kontolt platvormi jaotisest «Minu tunnistused».\n\nTäname, et valisid meie koolituse. Soovime Sulle õpitu rakendamisel edu ning loodame kohtuda ka järgmistel koolitustel!\n\nHoia end!\n{platform}"},
+      invoice:{subject:"Arve {number} — {seller}", body:"Tere!\n\nTäname tellimuse eest! Manuses on arve {number} summas {gross} (koos käibemaksuga).\nMaksetähtaeg: {due}.\n\nPalume tasuda arvel toodud arvelduskontole. Kui arve kohta on küsimusi, võta julgelt ühendust.\n\nLugupidamisega,\n{seller}"},
     } },
   staff:[
     { id:"u_admin", name:"Администратор", login:"admin", password:"admin", role:"admin", perms:{}, groups:"all" },
@@ -4378,9 +4380,8 @@ function emailCertModal(sid,cid){
     const b64=await certPdfBase64(sid,cid);
     if(!b64){ if(stat){stat.textContent=LANG==="et"?"PDF-i ei õnnestunud valmistada":"Не удалось подготовить PDF";stat.style.color="var(--amber)";} return; }
     if(stat)stat.textContent=LANG==="et"?"Saadan…":"Отправляю…";
-    const subj=LANG==="et"?`Tunnistus · ${c.title}`:`Сертификат · ${c.title}`;
-    const body=LANG==="et"?`Tere, ${fullName(s)}!\n\nManuses on Sinu tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}).`:`Здравствуйте, ${fullName(s)}!\n\nВо вложении ваш сертификат за курс «${c.title}» (№ ${nr}).`;
-    const r=await queueEmail(s.email,subj,body,"cert",{name:`${fullName(s)} — tunnistus.pdf`,content:b64});
+    const em=buildEmail("cert",{student:fullName(s),course:c.title,number:nr,platform:brandName()},()=>({s:`Palju õnne! Sinu tunnistus — ${c.title}`,b:`Tere, ${fullName(s)}!\n\nPalju õnne kursuse «${c.title}» eduka läbimise puhul!\n\nSinu tunnistus (nr ${nr}) on manuses ja alati ka Sinu kontol.\n\nHoia end!\n${brandName()}`}));
+    const r=await queueEmail(s.email,em.s,em.b,"cert",{name:`${fullName(s)} — tunnistus.pdf`,content:b64});
     logAudit(`Saatis tunnistuse PDF → ${s.email} · ${fullName(s)}`);
     $("#modal-root").innerHTML="";
     toast(SERVER.mode==="server"?(r&&r.sent?`📧 ${LANG==="et"?"Saadetud":"Отправлено"}`:(LANG==="et"?"⚠ Saatmine ebaõnnestus":"⚠ Не удалось отправить")):"📧");
@@ -4396,11 +4397,9 @@ function emailCertModal(sid,cid){
       if(SERVER.mode==="server"){ try{ await api(`/api/certificates/${ct.id}/signed`,{method:"POST",body:{signed_key:meta.key,signed_name:f.name}}); }catch(e){ if(stat){stat.textContent=LANG==="et"?"Serveri viga":"Ошибка сервера";stat.style.color="var(--amber)";} return; } }
       ct.signedKey=meta.key; ct.signedName=f.name; ct.signedAt=nowStr();
       if(stat)stat.textContent=LANG==="et"?"Saadan teavituse…":"Отправляю уведомление…";
-      const subj=LANG==="et"?`Allkirjastatud tunnistus on Sinu kontol · ${c.title}`:`Сертификат с подписью в вашем кабинете · ${c.title}`;
+      const subj=`Palju õnne! Sinu allkirjastatud tunnistus — ${c.title}`;
       const portal=location.origin;
-      const body=LANG==="et"
-        ? `Tere, ${fullName(s)}!\n\nSinu digitaalselt allkirjastatud tunnistus kursuse "${c.title}" läbimise eest (nr ${nr}) on lisatud Sinu kontole platvormil.\n\nPalun logi sisse ja laadi see alla 7 päeva jooksul:\n${portal}\n\nLugupidamisega,\n${brandName()}`
-        : `Здравствуйте, ${fullName(s)}!\n\nВаш сертификат с цифровой подписью за курс «${c.title}» (№ ${nr}) добавлен в ваш личный кабинет на платформе.\n\nПожалуйста, войдите и скачайте его в течение 7 дней:\n${portal}\n\nС уважением,\n${brandName()}`;
+      const body=`Tere, ${fullName(s)}!\n\nPalju õnne kursuse «${c.title}» läbimise puhul! Sinu digitaalselt allkirjastatud tunnistus (nr ${nr}) on nüüd Sinu kontol platvormil.\n\nPalun logi sisse ja laadi see alla 7 päeva jooksul:\n${portal}\n\nKui Sul on küsimusi, vasta julgelt sellele kirjale.\n\nHoia end!\n${brandName()}`;
       const r=await queueEmail(s.email,subj,body,"cert",null);
       logAudit(`Lisas allkirjastatud tunnistuse kontole + teavitas → ${s.email} · ${fullName(s)}`);
       $("#modal-root").innerHTML="";
@@ -5657,7 +5656,7 @@ function settingsView(){
     </tbody></table>`:`<div style="color:var(--faint);font-size:13.5px">${t("outbox_empty")}</div>`}
     <h2 style="font-size:16px;margin:28px 0 4px">✉️ ${t("tpl_title")}</h2>
     <div class="sub" style="color:var(--muted);font-size:13px;margin-bottom:16px">${t("tpl_hint")}</div>
-    ${[["cred",t("tpl_cred"),"{student} {login} {password} {platform}"],["hw",t("tpl_hw"),"{student} {course} {task} {deadline}"],["grade",t("tpl_grade"),"{student} {course} {task} {grade}"],["meet",t("tpl_meet"),"{student} {course} {group} {datetime} {link}"],["invoice",t("tpl_invoice"),"{number} {seller} {gross} {due}"]].map(([key,label,vars])=>{const tp=(DB.settings.templates||{})[key]||{subject:"",body:""};
+    ${[["cred",t("tpl_cred"),"{student} {login} {password} {platform}"],["reg",t("tpl_reg"),"{student} {platform}"],["hw",t("tpl_hw"),"{student} {course} {task} {deadline}"],["grade",t("tpl_grade"),"{student} {course} {task} {grade}"],["meet",t("tpl_meet"),"{student} {course} {group} {datetime} {link}"],["cert",t("tpl_cert"),"{student} {course} {number} {platform}"],["invoice",t("tpl_invoice"),"{number} {seller} {gross} {due}"]].map(([key,label,vars])=>{const tp=(DB.settings.templates||{})[key]||{subject:"",body:""};
       return `<div class="module" style="padding:16px 18px;margin-bottom:12px">
         <div style="font-weight:600;margin-bottom:4px">${label}</div><div class="hint" style="margin-bottom:10px">${t("tpl_vars")}: <code>${vars}</code></div>
         <div class="field" style="margin-bottom:10px"><label>${t("tpl_subject")}</label><input data-tpl-sub="${key}" value="${esc(tp.subject)}"></div>
