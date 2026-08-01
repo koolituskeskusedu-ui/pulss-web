@@ -3113,6 +3113,11 @@ const I18N = {
   f_ruhm:{ru:"Группа (Rühm)",et:"Rühm"}, f_course:{ru:"Курс",et:"Kursus"},
   reg_submit:{ru:"Отправить заявку",et:"Saada taotlus"}, has_acc:{ru:"Уже есть доступ?",et:"On juba ligipääs?"},
   reg_done:{ru:"Заявка отправлена! Администратор назначит курс и пришлёт письмо с логином и паролем.",et:"Taotlus saadetud! Administraator määrab kursuse ja saadab kirja kasutajanime ja parooliga."},
+  consent_pre:{ru:"Я ознакомился(-ась) с",et:"Olen tutvunud"}, privacy_link:{ru:"политикой конфиденциальности",et:"privaatsuspoliitikaga"}, consent_post:{ru:" и согласен(-на) на обработку персональных данных.",et:" ja nõustun oma isikuandmete töötlemisega."}, consent_required:{ru:"Пожалуйста, примите политику конфиденциальности",et:"Palun nõustu privaatsuspoliitikaga"},
+  privacy_title:{ru:"Политика конфиденциальности",et:"Privaatsuspoliitika"}, privacy_open:{ru:"Политика конфиденциальности",et:"Privaatsuspoliitika"},
+  gdpr:{ru:"Данные и GDPR",et:"Andmed ja GDPR"}, gdpr_export:{ru:"Экспорт данных",et:"Ekspordi andmed"}, gdpr_erase:{ru:"Удалить все данные",et:"Kustuta kõik andmed"}, gdpr_erase_confirm:{ru:"Удалить ученика и ВСЕ его персональные данные без возможности восстановления? Счета сохраняются по закону (обезличиваются).",et:"Kustutada õpilane ja KÕIK tema isikuandmed jäädavalt? Arved säilivad seaduse järgi (anonümiseeritakse)."},
+  my_data_dl:{ru:"Скачать мои данные",et:"Laadi alla minu andmed"},
+  backup_title:{ru:"Резервные копии",et:"Varukoopiad"}, backup_sub:{ru:"База копируется автоматически каждый день в защищённое хранилище (хранятся 30 дней).",et:"Andmebaasist tehakse automaatne varukoopia iga päev (säilib 30 päeva)."}, backup_now:{ru:"Сделать бэкап и скачать",et:"Tee varukoopia ja laadi alla"}, backup_recent:{ru:"Последние копии",et:"Viimased koopiad"},
   pick_group:{ru:"— выберите группу —",et:"— vali rühm —"},
   t_catalog:{ru:"Каталог курсов",et:"Kursuste kataloog"}, t_catalog_s:{ru:"Доступные курсы платформы",et:"Platvormi saadaolevad kursused"},
   t_my:{ru:"Мои курсы",et:"Minu kursused"}, t_my_s:{ru:"Курсы, на которые вы записаны",et:"Kursused, kuhu oled registreeritud"},
@@ -3615,14 +3620,31 @@ function buildEmail(type,vars,fallback){ const tpl=DB.settings.templates?.[type]
 function credEmail(s){ return buildEmail("cred",{student:fullName(s),login:fullName(s),password:s.password,platform:brandName()},()=>emailCredentials(s)); }
 
 /* --- GDPR --- */
-function gdprExport(sid){ const s=studentById(sid);
+async function gdprExport(sid){ const s=studentById(sid);
+  if(SERVER.mode==="server"){
+    try{ const res=await fetch(API_BASE+`/api/gdpr/export/${sid}`,{credentials:"include"});
+      if(res.ok){ const data=await res.json(); downloadFile(`gdpr_${(s?.isikukood||sid)}.json`,JSON.stringify(data,null,2),"application/json"); toast(t("gdpr_exported")); return; }
+    }catch(e){}
+    toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); return;
+  }
   const data={ student:s, progress:Object.fromEntries(Object.entries(DB.progress[sid]||{}).map(([cid,set])=>[cid,[...set]])),
     quizScores:DB.quizScores[sid]||{}, submissions:DB.submissions.filter(x=>x.studentId===sid),
     certificates:DB.certificates.filter(x=>x.studentId===sid), messages:DB.messages.filter(x=>x.studentId===sid),
     notifications:DB.notifs.filter(x=>x.studentId===sid),
     attendance:DB.meetings.filter(m=>m.attended&&m.attended[sid]!==undefined).map(m=>({meeting:m.id,title:m.title,date:m.date,present:!!m.attended[sid]})),
     exportedAt:nowStr() };
-  downloadFile(`gdpr_${(s.isikukood||sid)}.json`,JSON.stringify(data,null,2),"application/json"); logAudit(`GDPR: экспорт данных — ${fullName(s)}`); toast(t("gdpr_exported"));
+  downloadFile(`gdpr_${(s.isikukood||sid)}.json`,JSON.stringify(data,null,2),"application/json"); logAudit(`GDPR: eksport — ${fullName(s)}`); toast(t("gdpr_exported"));
+}
+// Самостоятельная выгрузка своих данных учеником.
+async function gdprExportMe(){
+  const s=currentStudent();
+  if(SERVER.mode==="server"){
+    try{ const res=await fetch(API_BASE+"/api/gdpr/me",{credentials:"include"});
+      if(res.ok){ const data=await res.json(); downloadFile(`minu_andmed_${(s?.isikukood||"data")}.json`,JSON.stringify(data,null,2),"application/json"); toast(t("gdpr_exported")); return; }
+    }catch(e){}
+    toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); return;
+  }
+  if(s) gdprExport(s.id);
 }
 function gdprDelete(sid){ const s=studentById(sid); const name=fullName(s);
   DB.students=DB.students.filter(x=>x.id!==sid); DB.submissions=DB.submissions.filter(x=>x.studentId!==sid);
@@ -3842,6 +3864,7 @@ function langToggle(){ return `<div class="lang"><button data-lang="et" class="$
 function authView(){
   if(view.name==="register") return registerView();
   if(view.name==="verify") return verifyView();
+  if(view.name==="privacy") return privacyView();
   return `<div class="auth-wrap">${authSide()}<div class="auth-main"><div class="auth-top">${langToggle()}</div>
     <div class="auth-box"><h1>${t("login_t")}</h1><div class="lead">${t("login_lead")}</div>
       <div class="field"><label>${t("f_login")}</label><input id="li-name" placeholder=""></div>
@@ -3849,6 +3872,7 @@ function authView(){
       <button class="btn primary" id="li-btn" style="width:100%;justify-content:center;margin-top:4px">${t("login_btn")}</button>
       <div style="margin-top:14px;font-size:13.5px;color:var(--muted)">${t("no_acc")} <span class="link" data-goreg>${t("reg_link")} →</span></div>
       <div style="margin-top:8px;font-size:13.5px"><span class="link" data-goverify>🔎 ${t("verify_link")}</span></div>
+      <div style="margin-top:8px;font-size:12.5px"><span class="link" data-goprivacy style="color:var(--muted)">${t("privacy_open")}</span></div>
     </div></div></div>`;
 }
 function registerView(){
@@ -3860,9 +3884,73 @@ function registerView(){
       <div class="field"><label>${t("f_email")}</label><input id="rg-email" type="email" placeholder="nimi@näide.ee"></div>
       <div class="field"><label>${t("f_ruhm")}</label><select id="rg-group"><option value="">${t("pick_group")}</option>
         ${DB.groups.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join("")}</select></div>
+      <label style="display:flex;gap:9px;align-items:flex-start;margin:2px 0 12px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="rg-consent" style="margin-top:3px;flex:0 0 auto"><span>${t("consent_pre")} <span class="link" data-goprivacy>${t("privacy_link")}</span>${t("consent_post")}</span></label>
       <button class="btn primary" id="rg-btn" style="width:100%;justify-content:center;margin-top:4px">${t("reg_submit")}</button>
       <div style="margin-top:14px;font-size:13.5px;color:var(--muted)">${t("has_acc")} <span class="link" data-gologin>${t("login_btn")} →</span></div>
     </div></div></div>`;
+}
+// Политика конфиденциальности (ET/RU) — публичная страница.
+function privacyPolicyHtml(lang){
+  const seller=DB.settings.seller||{};
+  const org=esc(seller.name||"EDU KOOLITUS OÜ");
+  const reg=esc(seller.regCode||"17217212");
+  const email=esc(seller.email||"esmaabi@edu-koolitus.ee");
+  const addr=esc(seller.address||"Tallinn, Eesti");
+  const upd="01.08.2026";
+  const h=(x)=>`<h2 style="font-size:16px;margin:22px 0 8px;color:var(--text)">${x}</h2>`;
+  const p=(x)=>`<p style="font-size:13.7px;line-height:1.65;color:var(--muted);margin:0 0 10px">${x}</p>`;
+  if(lang==="ru"){
+    return `<h1 style="font-size:22px;margin:0 0 4px">Политика конфиденциальности</h1>
+      ${p(`Обновлено: ${upd}`)}
+      ${h("1. Ответственный за обработку")}
+      ${p(`${org} (рег. код ${reg}), ${addr}. Контакт по вопросам защиты данных: <a href="mailto:${email}" style="color:var(--brand)">${email}</a>.`)}
+      ${h("2. Какие данные мы собираем")}
+      ${p("Имя и фамилия, личный код (isikukood), адрес e-mail, учебная группа; данные обучения (прогресс, домашние работы и файлы, оценки, посещаемость, сертификаты); данные счетов; переписка в чате платформы; технические данные входа (сессия).")}
+      ${h("3. Цели и правовые основания")}
+      ${p("Предоставление обучения и доступа к платформе — исполнение договора. Выдача сертификатов — договор и наши обязательства. Выставление и хранение счетов — юридическая обязанность (бухгалтерский учёт). Коммуникация по учёбе — согласие и законный интерес.")}
+      ${h("4. Сроки хранения")}
+      ${p("Данные учётной записи хранятся, пока аккаунт активен, и удаляются/архивируются по завершении. Счета хранятся 7 лет согласно Закону о бухгалтерском учёте Эстонии. Резервные копии базы хранятся 30 дней.")}
+      ${h("5. Получатели и обработчики")}
+      ${p("Мы не продаём персональные данные. Для работы платформы используются обработчики: Cloudflare (хостинг и хранение, ЕС) и Brevo (отправка писем, ЕС). Они обрабатывают данные по нашему поручению.")}
+      ${h("6. Ваши права")}
+      ${p("Вы вправе получить доступ к своим данным, исправить их, удалить («право на забвение»), получить копию (переносимость), ограничить или возразить против обработки, а также отозвать согласие. Для этого напишите на <a href=\"mailto:${email}\" style=\"color:var(--brand)\">${email}</a>. Ученики также могут выгрузить свои данные в личном кабинете.")}
+      ${h("7. Безопасность")}
+      ${p("Пароли хранятся в хешированном виде, доступ разграничен по ролям, соединение защищено (HTTPS), сессии — в защищённых cookie.")}
+      ${h("8. Жалобы")}
+      ${p("Вы можете обратиться в Инспекцию по защите данных Эстонии (Andmekaitse Inspektsioon, <a href=\"https://www.aki.ee\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--brand)\">aki.ee</a>).")}`;
+  }
+  return `<h1 style="font-size:22px;margin:0 0 4px">Privaatsuspoliitika</h1>
+    ${p(`Uuendatud: ${upd}`)}
+    ${h("1. Vastutav töötleja")}
+    ${p(`${org} (registrikood ${reg}), ${addr}. Andmekaitse küsimustes: <a href="mailto:${email}" style="color:var(--brand)">${email}</a>.`)}
+    ${h("2. Milliseid andmeid kogume")}
+    ${p("Ees- ja perekonnanimi, isikukood, e-posti aadress, õpperühm; õppeandmed (edenemine, kodutööd ja failid, hinded, kohalolek, tunnistused); arvete andmed; vestlused platvormi vestluses; tehnilised sisselogimisandmed (sessioon).")}
+    ${h("3. Eesmärgid ja õiguslik alus")}
+    ${p("Koolituse ja platvormi ligipääsu pakkumine — lepingu täitmine. Tunnistuste väljastamine — leping ja meie kohustused. Arvete koostamine ja säilitamine — juriidiline kohustus (raamatupidamine). Õppega seotud suhtlus — nõusolek ja õigustatud huvi.")}
+    ${h("4. Säilitamise tähtajad")}
+    ${p("Konto andmeid säilitame, kuni konto on aktiivne, ja kustutame/arhiveerime pärast lõpetamist. Arveid säilitame 7 aastat vastavalt raamatupidamise seadusele. Andmebaasi varukoopiaid säilitame 30 päeva.")}
+    ${h("5. Vastuvõtjad ja volitatud töötlejad")}
+    ${p("Me ei müü isikuandmeid. Platvormi toimimiseks kasutame volitatud töötlejaid: Cloudflare (majutus ja salvestus, EL) ja Brevo (kirjade saatmine, EL). Nad töötlevad andmeid meie juhiste alusel.")}
+    ${h("6. Sinu õigused")}
+    ${p(`Sul on õigus tutvuda oma andmetega, neid parandada, kustutada („õigus olla unustatud“), saada koopia (ülekantavus), piirata või esitada vastuväiteid töötlemisele ning nõusolek tagasi võtta. Selleks kirjuta <a href="mailto:${email}" style="color:var(--brand)">${email}</a>. Õpilased saavad oma andmed alla laadida ka oma kontol.`)}
+    ${h("7. Turvalisus")}
+    ${p("Paroolid on räsitud kujul, ligipääs on rollipõhine, ühendus on kaitstud (HTTPS), sessioonid turvalistes küpsistes.")}
+    ${h("8. Kaebused")}
+    ${p("Võid pöörduda Andmekaitse Inspektsiooni poole (<a href=\"https://www.aki.ee\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--brand)\">aki.ee</a>).")}`;
+}
+function privacyView(){
+  return `<div class="auth-wrap"><div class="auth-main" style="display:block;overflow:auto"><div class="auth-top">${langToggle()}</div>
+    <div class="auth-box" style="max-width:760px;margin:0 auto;text-align:left">
+      <div style="margin-bottom:6px"><span class="link" data-gologin>← ${t("login_btn")}</span></div>
+      ${privacyPolicyHtml(LANG)}
+    </div></div></div>`;
+}
+// Политика в модальном окне (не теряем ввод формы регистрации).
+function privacyModal(){
+  $("#modal-root").innerHTML=`<div class="modal-bg" data-close><div class="modal" style="max-width:640px;max-height:82vh;overflow:auto;text-align:left" onclick="event.stopPropagation()">
+    ${privacyPolicyHtml(LANG)}
+    <div class="modal-foot"><button class="btn ghost" data-close>${t("close")}</button></div></div></div>`;
+  document.querySelectorAll("[data-close]").forEach(el=>el.onclick=e=>{if(e.target===el)$("#modal-root").innerHTML="";});
 }
 let verifyResult=null;
 function verifyView(){
@@ -3909,6 +3997,7 @@ function bindAuth(){
   document.querySelectorAll("[data-goreg]").forEach(el=>el.onclick=()=>{verifyResult=null;go("register");});
   document.querySelectorAll("[data-goverify]").forEach(el=>el.onclick=()=>{verifyResult=null;go("verify");});
   document.querySelectorAll("[data-gologin]").forEach(el=>el.onclick=()=>{verifyResult=null;go("login");});
+  document.querySelectorAll("[data-goprivacy]").forEach(el=>el.onclick=(e)=>{e.preventDefault();e.stopPropagation();privacyModal();});
   const vfb=$("#vf-btn"); if(vfb) vfb.onclick=runVerify;
   if(pendingVerify&&view.name==="verify"){ const n=$("#vf-num"),l=$("#vf-last"); if(n&&l){ n.value=pendingVerify.num; l.value=pendingVerify.last; pendingVerify=null; runVerify(); } }
   document.querySelectorAll("[data-demo]").forEach(el=>el.onclick=()=>{
@@ -3946,13 +4035,14 @@ function bindAuth(){
     const first=$("#rg-first").value.trim(),last=$("#rg-last").value.trim(),code=$("#rg-code").value.trim(),email=$("#rg-email").value.trim(),gid=$("#rg-group").value;
     if(!first||!last||!code||!email||!gid){toast(LANG==="et"?"Täida kõik väljad":"Заполните все поля");return;}
     if(!validateIsikukood(code).valid){toast(t("ik_invalid"));showIkStatus(code,$("#rg-code-status"));return;}
+    if(!$("#rg-consent")?.checked){toast(t("consent_required"));return;}
     if(SERVER.online){
       const btn=$("#rg-btn"); if(btn){btn.disabled=true;btn.textContent="…";}
-      try{ await api("/api/requests",{method:"POST",body:{first_name:first,last_name:last,isikukood:code,email,group_id:gid}});
+      try{ await api("/api/requests",{method:"POST",body:{first_name:first,last_name:last,isikukood:code,email,group_id:gid,consent:true,consent_version:"v1"}});
         showInfoModal("✅",t("reg_done"),()=>go("login")); return;
       }catch(e){ if(btn){btn.disabled=false;btn.textContent=t("reg_submit");} toast(LANG==="et"?"Serveri viga, proovi uuesti":"Ошибка сервера, повторите"); return; }
     }
-    DB.requests.push({id:uid("r"),firstName:first,lastName:last,isikukood:code,email,groupId:gid,date:today()});
+    DB.requests.push({id:uid("r"),firstName:first,lastName:last,isikukood:code,email,groupId:gid,date:today(),consentAt:nowStr()});
     showInfoModal("✅",t("reg_done"),()=>go("login"));
   };
 }
@@ -4244,7 +4334,11 @@ function studentCertsView(){
   });
   return `${topbar(t("t_certs"),t("t_certs_s"))}<div class="content">
     ${cards.length?`<div class="grid">${cards.join("")}</div>`
-      :emptyState("🏆",t("no_certs"),LANG==="et"?"Tunnistuse väljastab administraator pärast kursuse lõpetamist":"Сертификат выдаёт администратор после завершения курса")}</div>`;
+      :emptyState("🏆",t("no_certs"),LANG==="et"?"Tunnistuse väljastab administraator pärast kursuse lõpetamist":"Сертификат выдаёт администратор после завершения курса")}
+    <div style="margin-top:30px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+      <button class="btn sm" data-my-data>⬇ ${t("my_data_dl")}</button>
+      <span class="link" data-goprivacy style="font-size:13px;color:var(--muted)">${t("privacy_open")}</span>
+    </div></div>`;
 }
 // Круглая печать pulss. (SVG) — рендерится в html2canvas.
 function stampSVG(px){
@@ -4790,8 +4884,8 @@ function studentCard(sid){
     if(SERVER.mode==="server"){ try{ const res=await api(`/api/students/${s.id}/reset-password`,{method:"POST"}); if(res&&res.password){ s.password=res.password; const f=$("#sc-pass"); if(f)f.value=res.password; logAudit(`Lähtestas parooli — ${fullName(s)}`); showCredentials({firstName:s.firstName,lastName:s.lastName,password:res.password}); } }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); } return; }
     const np=genPassword();s.password=np;$("#sc-pass").value=np;const em=credEmail(s);queueEmail(s.email,em.s,em.b,"cred");logAudit(`Сбросил пароль — ${fullName(s)}`);toast(t("pass_reset"));};
   const geB=$("[data-gdpr-exp]"); if(geB)geB.onclick=()=>gdprExport(s.id);
-  const gdB=$("[data-gdpr-del]"); if(gdB)gdB.onclick=()=>confirmModal(t("gdpr_confirm"),async()=>{
-    if(SERVER.mode==="server"){ try{ await api(`/api/students/${s.id}`,{method:"DELETE"}); await rehydrateStudents(); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); } }
+  const gdB=$("[data-gdpr-del]"); if(gdB)gdB.onclick=()=>confirmModal(t("gdpr_erase_confirm"),async()=>{
+    if(SERVER.mode==="server"){ try{ await api(`/api/gdpr/erase/${s.id}`,{method:"POST"}); await rehydrateStudents(); }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); return; } }
     else gdprDelete(s.id);
     $("#modal-root").innerHTML="";render();toast(t("gdpr_deleted"));});
   const delB=$("[data-sc-del]"); if(delB)delB.onclick=async()=>{
@@ -5630,7 +5724,14 @@ function settingsView(){
       <div class="field"><label>${t("cert_verify_url")}</label><input id="set-verifyurl" value="${esc(s.certVerifyUrl||"")}" placeholder="https://lms-api.example.workers.dev/verify"></div>
       <div class="hint" style="margin:-6px 0 12px;font-size:12px;color:var(--faint)">✉️ ${t("set_email_note")}</div>
       <div style="display:flex;justify-content:flex-end"><button class="btn primary" data-set-save>${t("save")}</button></div>
-    </div>`;
+    </div>${DB.session.role==="admin"?`
+    <div class="module" style="padding:22px 24px;margin-top:18px">
+      <div style="font-weight:600;font-size:15px;margin-bottom:4px">🛟 ${t("backup_title")}</div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:14px">${t("backup_sub")}</div>
+      <button class="btn" data-backup-now>⬇ ${t("backup_now")}</button>
+      <div style="font-size:12.5px;color:var(--muted);margin:16px 0 6px">${t("backup_recent")}:</div>
+      <div id="backup-list" style="font-size:13px;color:var(--faint)">…</div>
+    </div>`:""}`;
   } else if(settingsTab==="invoices"){
     body=`<div class="sub" style="color:var(--muted);font-size:13px;margin-bottom:16px">${t("t_invoices_s")}</div>
     <div class="module" style="padding:22px 24px">
@@ -5872,6 +5973,8 @@ function bindGlobal(){
   document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=()=>go(el.dataset.nav));
   document.querySelectorAll("[data-back]").forEach(el=>el.onclick=()=>go(isStaff()?"admin-courses":"my-courses"));
   document.querySelectorAll("[data-logout]").forEach(el=>el.onclick=async()=>{await serverLogout();DB.session=null;go("login");});
+  document.querySelectorAll("[data-my-data]").forEach(el=>el.onclick=()=>gdprExportMe());
+  document.querySelectorAll("[data-goprivacy]").forEach(el=>el.onclick=(e)=>{e.preventDefault();e.stopPropagation();privacyModal();});
   document.querySelectorAll("[data-course]").forEach(el=>el.onclick=()=>go("course",{courseId:el.dataset.course}));
   document.querySelectorAll("[data-lesson]").forEach(el=>el.onclick=()=>{const[cid,lid]=el.dataset.lesson.split(":");go("lesson",{courseId:cid,lessonId:lid});});
   document.querySelectorAll("[data-start]").forEach(el=>el.onclick=()=>go("lesson",{courseId:view.courseId,lessonId:el.dataset.start}));
@@ -6011,7 +6114,33 @@ function bindGlobal(){
   document.querySelectorAll("[data-seller-save]").forEach(el=>el.onclick=async()=>{DB.settings.seller={name:$("#sel-name").value.trim(),regCode:$("#sel-reg").value.trim(),vatNo:$("#sel-vat").value.trim(),address:$("#sel-addr").value.trim(),iban:$("#sel-iban").value.trim(),bank:$("#sel-bank").value.trim(),email:$("#sel-email").value.trim(),phone:$("#sel-phone").value.trim()};DB.settings.invoiceDefaultPrice=+$("#sel-price").value||0;DB.settings.invoiceDueDays=+$("#sel-duedays").value||14;DB.settings.invoiceVatRate=+($("#sel-vatrate")?.value)||0;DB.settings.invoicePriceIncludesVat=($("#sel-pmode")?.value==="gross");await saveSettingsServer();render();toast(t("inv_seller_saved"));});
   document.querySelectorAll("[data-tpl-sub]").forEach(el=>{el.oninput=()=>{const k=el.dataset.tplSub;DB.settings.templates[k]=DB.settings.templates[k]||{};DB.settings.templates[k].subject=el.value;};el.onchange=()=>saveSettingsServer();});
   document.querySelectorAll("[data-tpl-body]").forEach(el=>{el.oninput=()=>{const k=el.dataset.tplBody;DB.settings.templates[k]=DB.settings.templates[k]||{};DB.settings.templates[k].body=el.value;};el.onchange=()=>saveSettingsServer();});
+  bindBackup();
   bindEditor();
+}
+// Резервные копии (админ): скачать сейчас + список последних.
+async function downloadServerFile(path,fallbackName){
+  if(SERVER.mode!=="server"){ toast(LANG==="et"?"Saadaval ainult serveris":"Доступно только на сервере"); return; }
+  try{
+    const res=await fetch(API_BASE+path,{credentials:"include"});
+    if(!res.ok) throw new Error("http_"+res.status);
+    const blob=await res.blob();
+    const cd=res.headers.get("content-disposition")||""; const m=cd.match(/filename="([^"]+)"/);
+    const name=m?m[1]:fallbackName;
+    const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+  }catch(e){ toast(LANG==="et"?"Serveri viga":"Ошибка сервера"); }
+}
+function bindBackup(){
+  const nb=$("[data-backup-now]"); if(nb)nb.onclick=async()=>{ nb.disabled=true; const o=nb.textContent; nb.textContent="…"; await downloadServerFile("/api/backup/now","backup.json"); nb.disabled=false; nb.textContent=o; loadBackupList(); };
+  loadBackupList();
+}
+async function loadBackupList(){
+  const box=$("#backup-list"); if(!box)return;
+  if(SERVER.mode!=="server"){ box.textContent=LANG==="et"?"Saadaval ainult serveris":"Доступно только на сервере"; return; }
+  try{ const res=await fetch(API_BASE+"/api/backup/list",{credentials:"include"}); const list=res.ok?await res.json():[];
+    if(!Array.isArray(list)||!list.length){ box.textContent=LANG==="et"?"Veel pole koopiaid":"Пока нет копий"; return; }
+    box.innerHTML=list.slice(0,10).map(o=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border)"><span>📄 ${esc(o.name)} <span style="color:var(--faint)">· ${(o.size/1024).toFixed(0)} KB</span></span><span class="link" data-backup-dl="${esc(o.name)}">⬇</span></div>`).join("");
+    box.querySelectorAll("[data-backup-dl]").forEach(el=>el.onclick=()=>downloadServerFile("/api/backup/file/"+encodeURIComponent(el.dataset.backupDl),el.dataset.backupDl));
+  }catch(e){ box.textContent="—"; }
 }
 function completeLesson(key){
   const[cid,lid]=key.split(":");const sid=DB.session.studentId;ensureProg(sid,cid).add(lid);touch(sid);
