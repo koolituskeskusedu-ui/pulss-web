@@ -60,6 +60,10 @@
   .user-chip .rl{font-size:11.5px;color:var(--muted)}
 
   .main{overflow-x:hidden}
+  /* Мобильное меню и горизонтальная прокрутка таблиц */
+  .hamb{display:none;position:fixed;top:9px;left:11px;z-index:70;width:42px;height:42px;align-items:center;justify-content:center;font-size:22px;background:var(--surface);border:1px solid var(--border-2);border-radius:10px;box-shadow:var(--shadow-lg);cursor:pointer;color:var(--text);line-height:1;padding:0}
+  .nav-scrim{display:none}
+  .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
   .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 32px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(247,246,243,.88);backdrop-filter:blur(12px);z-index:20}
   .topbar h1{font-size:22px;margin:0;letter-spacing:-.4px;font-weight:600}
   .topbar .sub{font-size:13px;color:var(--muted);margin-top:2px}
@@ -308,10 +312,34 @@
   .bar-row .bv{width:52px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
   @media(max-width:860px){
     .dash2{grid-template-columns:1fr}
-    .app{grid-template-columns:1fr}.sidebar{display:none}
-    .lesson-layout,.chat-layout{grid-template-columns:1fr}.lesson-side,.thread-list{display:none}
-    .content,.lesson-main{padding-left:18px;padding-right:18px}.topbar{padding:14px 18px}
+    .app{grid-template-columns:1fr}
+    .hamb{display:flex}
+    /* Боковое меню — выдвижная панель */
+    .sidebar{position:fixed;top:0;left:0;height:100vh;width:264px;max-width:84vw;z-index:65;transform:translateX(-100%);transition:transform .22s ease;box-shadow:var(--shadow-lg);border-right:1px solid var(--border);padding-top:60px}
+    .app.nav-open .sidebar{transform:none}
+    .nav-scrim{display:block;position:fixed;inset:0;background:rgba(18,16,14,.45);z-index:60;opacity:0;pointer-events:none;transition:opacity .2s}
+    .app.nav-open .nav-scrim{opacity:1;pointer-events:auto}
+    /* Верхняя панель — место под кнопку меню */
+    .topbar{padding:14px 16px 14px 62px}
+    .topbar h1{font-size:18px}
+    .content{padding:20px 16px 60px}
     .row{grid-template-columns:1fr}
+    .grid{grid-template-columns:1fr;gap:14px}
+    .modal{padding:20px}
+    .modal-bg{padding:12px}
+    .search{max-width:none;flex:1 1 100%;min-width:0}
+    /* Вкладки — горизонтальная прокрутка вместо сжатия */
+    .tabs{overflow-x:auto;flex-wrap:nowrap}
+    .tabs [data-settab]{flex:0 0 auto !important}
+    /* Таблицы — прокрутка вбок, чтобы колонки не сжимались */
+    .tbl-wrap>.table,.tbl-wrap>.jtable{min-width:620px}
+    /* Урок: список уроков сверху, прокручиваемый */
+    .lesson-layout{grid-template-columns:1fr}
+    .lesson-side{display:block;border-right:none;border-bottom:1px solid var(--border);max-height:38vh;overflow:auto}
+    .lesson-main{padding:22px 16px 60px}.lesson-main h1{font-size:24px}
+    /* Чат: список переписок сверху */
+    .chat-layout{grid-template-columns:1fr}
+    .thread-list{display:block;border-right:none;border-bottom:1px solid var(--border);max-height:34vh;overflow:auto}
   }
 </style>
 </head>
@@ -3817,17 +3845,24 @@ async function serverLogout(){ try{ if(SERVER.mode==="server") await api("/api/l
 
 /* ============ Роутинг ============ */
 let view={ name:"login" };
-/* ---- URL-роутинг (хэш): каждая страница получает свой адрес, F5 остаётся на месте ---- */
+/* ---- URL-роутинг (реальные пути): каждая страница получает свой адрес /имя, F5 остаётся на месте ---- */
+// Работает благодаря SPA-fallback на pulss-web (not_found_handling="single-page-application"):
+// любой путь отдаёт index.html, а тут мы восстанавливаем нужную страницу.
 const HASH_KEYS=["courseId","lessonId","thread"];
 const NO_HASH=["login","register","verify"];
-function viewToHash(v){ if(!v||!v.name||NO_HASH.includes(v.name)) return "";
+function pathFromView(v){ if(!v||!v.name||NO_HASH.includes(v.name)) return "/";
   const q=HASH_KEYS.filter(k=>v[k]).map(k=>k+"="+encodeURIComponent(v[k]));
-  return "#"+encodeURIComponent(v.name)+(q.length?"?"+q.join("&"):""); }
+  return "/"+encodeURIComponent(v.name)+(q.length?"?"+q.join("&"):""); }
+function parsePath(){ const seg=(location.pathname||"/").replace(/^\/+/,"").replace(/\/+$/,""); if(!seg) return null;
+  const v={name:decodeURIComponent(seg)};
+  const qs=(location.search||"").replace(/^\?/,"");
+  if(qs)qs.split("&").forEach(p=>{const[k,val]=p.split("=");if(HASH_KEYS.includes(k))v[k]=decodeURIComponent(val||"");});
+  return v; }
+// Совместимость со старыми ссылками вида #admin-students (хэш-роутинг).
 function parseHash(){ const h=(location.hash||"").replace(/^#\/?/,""); if(!h) return null;
   const [n,qs]=h.split("?"); const v={name:decodeURIComponent(n)};
   if(qs)qs.split("&").forEach(p=>{const[k,val]=p.split("=");if(k)v[k]=decodeURIComponent(val||"");});
   return v; }
-let _hashLock=false;
 function restoreView(v){
   let nv={...v};
   if(["course","lesson","admin-edit"].includes(nv.name)&&(!nv.courseId||!courseById(nv.courseId)))
@@ -3836,13 +3871,14 @@ function restoreView(v){
   catch(e){ go(DB.session&&DB.session.role==="student"?"my-courses":"dashboard"); }
 }
 function go(name,extra={}){ view={name,...extra}; render(); window.scrollTo(0,0);
-  const h=viewToHash(view);
-  if(location.hash!==h){ _hashLock=true;
-    try{ if(h) location.hash=h; else if(location.hash) history.replaceState(null,"",location.pathname+location.search); }catch(e){}
-  }
+  const path=pathFromView(view);
+  try{ const cur=location.pathname+location.search+location.hash;
+    if(path!==cur){ if(NO_HASH.includes(view.name)) history.replaceState(null,"",path); else history.pushState(null,"",path); }
+  }catch(e){}
 }
-window.addEventListener("hashchange",()=>{ if(_hashLock){ _hashLock=false; return; }
-  if(!DB.session) return; const v=parseHash(); if(v&&v.name) restoreView(v); });
+window.addEventListener("popstate",()=>{ if(!DB.session) return;
+  const v=parsePath(); if(v&&v.name) restoreView(v);
+  else restoreView({name:DB.session.role==="student"?"my-courses":"dashboard"}); });
 function setLang(l){ LANG=l; document.documentElement.lang=l; render(); }
 
 /* =====================================================================
@@ -3851,7 +3887,7 @@ function setLang(l){ LANG=l; document.documentElement.lang=l; render(); }
 function render(){
   const app=$("#app");
   if(!DB.session){ app.innerHTML=authView(); bindAuth(); return; }
-  app.innerHTML=`<div class="app">${sidebar()}<div class="main">${mainView()}</div></div>`;
+  app.innerHTML=`<div class="app"><button class="hamb" data-navtoggle aria-label="Menüü">☰</button>${sidebar()}<div class="main">${mainView()}</div><div class="nav-scrim" data-navclose></div></div>`;
   bindGlobal();
 }
 
@@ -3894,7 +3930,7 @@ function privacyPolicyHtml(lang){
   const seller=DB.settings.seller||{};
   const org=esc(seller.name||"EDU KOOLITUS OÜ");
   const reg=esc(seller.regCode||"17217212");
-  const email=esc(seller.email||"esmaabi@edu-koolitus.ee");
+  const email="info@pulss-koolitus.ee";
   const addr=esc(seller.address||"Tallinn, Eesti");
   const upd="01.08.2026";
   const h=(x)=>`<h2 style="font-size:16px;margin:22px 0 8px;color:var(--text)">${x}</h2>`;
@@ -3913,7 +3949,7 @@ function privacyPolicyHtml(lang){
       ${h("5. Получатели и обработчики")}
       ${p("Мы не продаём персональные данные. Для работы платформы используются обработчики: Cloudflare (хостинг и хранение, ЕС) и Brevo (отправка писем, ЕС). Они обрабатывают данные по нашему поручению.")}
       ${h("6. Ваши права")}
-      ${p("Вы вправе получить доступ к своим данным, исправить их, удалить («право на забвение»), получить копию (переносимость), ограничить или возразить против обработки, а также отозвать согласие. Для этого напишите на <a href=\"mailto:${email}\" style=\"color:var(--brand)\">${email}</a>. Ученики также могут выгрузить свои данные в личном кабинете.")}
+      ${p(`Вы вправе получить доступ к своим данным, исправить их, удалить («право на забвение»), получить копию (переносимость), ограничить или возразить против обработки, а также отозвать согласие. Чтобы воспользоваться этими правами или получить копию своих данных, напишите на <a href="mailto:${email}" style="color:var(--brand)">${email}</a>.`)}
       ${h("7. Безопасность")}
       ${p("Пароли хранятся в хешированном виде, доступ разграничен по ролям, соединение защищено (HTTPS), сессии — в защищённых cookie.")}
       ${h("8. Жалобы")}
@@ -3932,7 +3968,7 @@ function privacyPolicyHtml(lang){
     ${h("5. Vastuvõtjad ja volitatud töötlejad")}
     ${p("Me ei müü isikuandmeid. Platvormi toimimiseks kasutame volitatud töötlejaid: Cloudflare (majutus ja salvestus, EL) ja Brevo (kirjade saatmine, EL). Nad töötlevad andmeid meie juhiste alusel.")}
     ${h("6. Sinu õigused")}
-    ${p(`Sul on õigus tutvuda oma andmetega, neid parandada, kustutada („õigus olla unustatud“), saada koopia (ülekantavus), piirata või esitada vastuväiteid töötlemisele ning nõusolek tagasi võtta. Selleks kirjuta <a href="mailto:${email}" style="color:var(--brand)">${email}</a>. Õpilased saavad oma andmed alla laadida ka oma kontol.`)}
+    ${p(`Sul on õigus tutvuda oma andmetega, neid parandada, kustutada („õigus olla unustatud“), saada koopia (ülekantavus), piirata või esitada vastuväiteid töötlemisele ning nõusolek tagasi võtta. Nende õiguste kasutamiseks või oma andmete koopia saamiseks kirjuta <a href="mailto:${email}" style="color:var(--brand)">${email}</a>.`)}
     ${h("7. Turvalisus")}
     ${p("Paroolid on räsitud kujul, ligipääs on rollipõhine, ühendus on kaitstud (HTTPS), sessioonid turvalistes küpsistes.")}
     ${h("8. Kaebused")}
@@ -4334,11 +4370,7 @@ function studentCertsView(){
   });
   return `${topbar(t("t_certs"),t("t_certs_s"))}<div class="content">
     ${cards.length?`<div class="grid">${cards.join("")}</div>`
-      :emptyState("🏆",t("no_certs"),LANG==="et"?"Tunnistuse väljastab administraator pärast kursuse lõpetamist":"Сертификат выдаёт администратор после завершения курса")}
-    <div style="margin-top:30px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
-      <button class="btn sm" data-my-data>⬇ ${t("my_data_dl")}</button>
-      <span class="link" data-goprivacy style="font-size:13px;color:var(--muted)">${t("privacy_open")}</span>
-    </div></div>`;
+      :emptyState("🏆",t("no_certs"),LANG==="et"?"Tunnistuse väljastab administraator pärast kursuse lõpetamist":"Сертификат выдаёт администратор после завершения курса")}</div>`;
 }
 // Круглая печать pulss. (SVG) — рендерится в html2canvas.
 function stampSVG(px){
@@ -5970,7 +6002,13 @@ async function duplicateCourse(cid){
    ===================================================================== */
 function bindGlobal(){
   document.querySelectorAll("[data-lang]").forEach(el=>el.onclick=()=>setLang(el.dataset.lang));
-  document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=()=>go(el.dataset.nav));
+  document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=()=>{ document.querySelector(".app")?.classList.remove("nav-open"); go(el.dataset.nav); });
+  // Мобильное меню: открыть/закрыть выдвижную панель
+  const _app=document.querySelector(".app");
+  const _ham=document.querySelector("[data-navtoggle]"); if(_ham)_ham.onclick=()=>_app&&_app.classList.toggle("nav-open");
+  document.querySelectorAll("[data-navclose]").forEach(el=>el.onclick=()=>_app&&_app.classList.remove("nav-open"));
+  // Таблицы: оборачиваем для горизонтальной прокрутки на узких экранах
+  document.querySelectorAll(".main table.table, .main table.jtable").forEach(tb=>{ const par=tb.parentElement; if(par&&par.classList.contains("tbl-wrap"))return; const w=document.createElement("div"); w.className="tbl-wrap"; tb.parentNode.insertBefore(w,tb); w.appendChild(tb); });
   document.querySelectorAll("[data-back]").forEach(el=>el.onclick=()=>go(isStaff()?"admin-courses":"my-courses"));
   document.querySelectorAll("[data-logout]").forEach(el=>el.onclick=async()=>{await serverLogout();DB.session=null;go("login");});
   document.querySelectorAll("[data-my-data]").forEach(el=>el.onclick=()=>gdprExportMe());
@@ -6245,8 +6283,8 @@ document.addEventListener("keydown",(e)=>{ if(e.key==="Escape"){ const mr=$("#mo
       const me=await api("/api/me");  // если cookie-сессия валидна — 200
       applyServerSession(me);
       await hydrateReference();
-      const hv=parseHash();           // при F5 — вернуться на ту же страницу
-      if(hv&&hv.name&&!NO_HASH.includes(hv.name)) restoreView(hv);
+      const hv=parsePath()||parseHash();   // при F5 — вернуться на ту же страницу (путь, старый хэш — для совместимости)
+      if(hv&&hv.name&&!NO_HASH.includes(hv.name)){ restoreView(hv); try{ history.replaceState(null,"",pathFromView(view)); }catch(e){} }
       else go(DB.session.role==="student"?"my-courses":"dashboard");
       return;
     }catch(e){ /* 401 → не авторизован, показываем вход */ }
